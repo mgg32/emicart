@@ -1,0 +1,41 @@
+[
+  {
+    "name": "Direct Voltage (No Probe)",
+    "measured_units": "dBuV",
+    "impedance_ohms": null,
+    "description": "No conversion. Scope voltage is plotted as dBuV."
+  },
+  {
+    "name": "50 Ohm LISN / Transimpedance",
+    "measured_units": "dBuA",
+    "impedance_ohms": 50.0,
+    "description": "Converts scope dBuV to dBuA using 50 ohm transimpedance."
+  },
+  {
+    "name": "5 Ohm Current Probe",
+    "measured_units": "dBuA",
+    "impedance_ohms": 5.0,
+    "description": "Converts scope dBuV to dBuA using 5 ohm transimpedance."
+  },
+  {
+    "name": "E-Field Probe (20 V/m per V)",
+    "measured_units": "V/m",
+    "impedance_ohms": null,
+    "volts_to_v_per_m_gain": 20.0,
+    "description": "Converts scope voltage to electric field using 20 V/m per V gain."
+  },
+  {
+    "name": "E-Field Probe (100 V/m per V)",
+    "measured_units": "V/m",
+    "impedance_ohms": null,
+    "volts_to_v_per_m_gain": 100.0,
+    "description": "Converts scope voltage to electric field using 100 V/m per V gain."
+  },
+  {
+    "name": "E-Field Probe (Placeholder)",
+    "measured_units": "V/m",
+    "impedance_ohms": null,
+    "volts_to_v_per_m_gain": 1.0,
+    "description": "Placeholder electric-field probe. Update gain to your calibrated V/m per V value."
+  }
+]

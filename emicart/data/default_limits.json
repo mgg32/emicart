@@ -1,0 +1,206 @@
+{
+  "MIL-STD-461G": [
+    {
+      "name": "MIL-STD-461G CE102 28V",
+      "units": "dBuV",
+      "breakpoints": [
+        [
+          10000.0,
+          94.0
+        ],
+        [
+          501187.0,
+          60.0
+        ],
+        [
+          10000000.0,
+          60.0
+        ]
+      ],
+      "resolution_bandwidth_hz": [
+        10000.0,
+        10000.0
+      ]
+    },
+    {
+      "name": "MIL-STD-461G CE102 115V",
+      "units": "dBuV",
+      "breakpoints": [
+        [
+          10000.0,
+          100.0
+        ],
+        [
+          501187.0,
+          66.0
+        ],
+        [
+          10000000.0,
+          66.0
+        ]
+      ],
+      "resolution_bandwidth_hz": [
+        10000.0,
+        10000.0
+      ]
+    },
+    {
+      "name": "MIL-STD-461G CE102 220V",
+      "units": "dBuV",
+      "breakpoints": [
+        [
+          10000.0,
+          103.0
+        ],
+        [
+          501187.0,
+          69.0
+        ],
+        [
+          10000000.0,
+          69.0
+        ]
+      ],
+      "resolution_bandwidth_hz": [
+        10000.0,
+        10000.0
+      ]
+    },
+    {
+      "name": "MIL-STD-461G CE102 270V",
+      "units": "dBuV",
+      "breakpoints": [
+        [
+          10000.0,
+          104.0
+        ],
+        [
+          501187.0,
+          70.0
+        ],
+        [
+          10000000.0,
+          70.0
+        ]
+      ],
+      "resolution_bandwidth_hz": [
+        10000.0,
+        10000.0
+      ]
+    },
+    {
+      "name": "MIL-STD-461G CE102 440V",
+      "units": "dBuV",
+      "breakpoints": [
+        [
+          10000.0,
+          106.0
+        ],
+        [
+          501187.0,
+          72.0
+        ],
+        [
+          10000000.0,
+          72.0
+        ]
+      ],
+      "resolution_bandwidth_hz": [
+        10000.0,
+        10000.0
+      ]
+    }
+  ],
+  "DO-160G": [
+    {
+      "name": "DO-160G Sec 21 Cat M (Placeholder)",
+      "units": "dBuV",
+      "breakpoints": [
+        [
+          150000.0,
+          70.0
+        ],
+        [
+          30000000.0,
+          70.0
+        ],
+        [
+          152000000.0,
+          70.0
+        ]
+      ],
+      "resolution_bandwidth_hz": [
+        10000.0,
+        10000.0
+      ]
+    },
+    {
+      "name": "DO-160G Sec 21 Cat H (Placeholder)",
+      "units": "dBuV",
+      "breakpoints": [
+        [
+          150000.0,
+          76.0
+        ],
+        [
+          30000000.0,
+          76.0
+        ],
+        [
+          152000000.0,
+          76.0
+        ]
+      ],
+      "resolution_bandwidth_hz": [
+        10000.0,
+        10000.0
+      ]
+    }
+  ],
+  "Placeholder Standards": [
+    {
+      "name": "Current Limit (dBuA Placeholder)",
+      "units": "dBuA",
+      "breakpoints": [
+        [
+          10000.0,
+          80.0
+        ],
+        [
+          1000000.0,
+          60.0
+        ],
+        [
+          10000000.0,
+          60.0
+        ]
+      ],
+      "resolution_bandwidth_hz": [
+        10000.0,
+        10000.0
+      ]
+    },
+    {
+      "name": "E-Field Limit (V/m Placeholder)",
+      "units": "V/m",
+      "breakpoints": [
+        [
+          1000000.0,
+          3.0
+        ],
+        [
+          30000000.0,
+          3.0
+        ],
+        [
+          200000000.0,
+          3.0
+        ]
+      ],
+      "resolution_bandwidth_hz": [
+        120000.0,
+        120000.0
+      ]
+    }
+  ]
+}
