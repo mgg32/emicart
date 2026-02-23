@@ -6,7 +6,12 @@ import numpy as np
 
 from emicart.limits import registry as curve
 from emicart.analysis.fft import compute_single_sided_fft_db
-from emicart.instruments.tektronix import configure_timebase, connect_to_scope, download_waveform
+from emicart.instruments.tektronix import (
+    configure_timebase,
+    connect_to_scope,
+    download_waveform,
+    get_record_length,
+)
 
 DEFAULT_LIMIT_STANDARD = None
 DEFAULT_LIMIT_CURVE = None
@@ -160,7 +165,7 @@ def main():
 
         xincr = float(scope.query("WFMPRE:XINCR?"))
         sample_rate = 1 / xincr
-        actual_record_length = int(scope.query("HOR:RECO?"))
+        actual_record_length = get_record_length(scope)
         actual_time_span = xincr * actual_record_length
         actual_time_per_div = actual_time_span / 10
         f_min_fft = 1 / actual_time_span
