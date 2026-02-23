@@ -9,7 +9,10 @@ Run the GUI with:
 - `python -m emicart`
 
 Scope selection defaults to automatic VISA discovery. If multiple instruments are connected, set
-`EMICART_SCOPE_RESOURCE` to force a specific Tektronix resource string.
+`EMICART_SCOPE_RESOURCE` to force a specific Tektronix resource string. Set
+`EMICART_VISA_BACKEND` to choose the VISA implementation (`@py` by default, or blank/`ni` for
+system NI-VISA).
+
 
 ## Data Formats
 

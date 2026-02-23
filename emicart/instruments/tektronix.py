@@ -8,12 +8,30 @@ import pyvisa
 
 DEFAULT_RESOURCE = None
 DEFAULT_BACKEND = "@py"
+DEFAULT_BACKEND_ENV = "EMICART_VISA_BACKEND"
 DEFAULT_OPEN_TIMEOUT_MS = 3000
 DEFAULT_IO_TIMEOUT_MS = 5000
 DEFAULT_MAX_POINTS = 1_000_000
 
 WAVEFORM_METADATA_ATTR = "_emicart_waveform_metadata"
 
+
+def _resolve_backend(backend):
+    env_backend = os.environ.get(DEFAULT_BACKEND_ENV)
+    selected = backend
+    if env_backend is not None:
+        selected = env_backend.strip()
+
+    normalized = (selected or "").strip().lower()
+    if normalized in {"", "default", "system", "ni", "@ni", "ni-visa", "nivisa"}:
+        return None
+    return selected
+
+
+def _open_resource_manager(backend):
+    if backend is None:
+        return pyvisa.ResourceManager()
+    return pyvisa.ResourceManager(backend)
 
 def _prioritized_candidates(resources):
     tcpip = [r for r in resources if "TCPIP" in r]
@@ -56,7 +74,11 @@ def _is_tektronix_scope(scope):
     try:
         idn = scope.query("*IDN?").strip()
     except Exception:
-        return False, ""
+        try:
+            scope.write("*IDN?")
+            idn = scope.read().strip()
+        except Exception:
+            return False, ""
     return ("TEKTRONIX" in idn.upper()), idn
 
 
@@ -179,7 +201,10 @@ def connect_to_scope(
 ):
     env_resource = os.environ.get("EMICART_SCOPE_RESOURCE", "").strip()
     preferred = resource_str or env_resource
-    rm = pyvisa.ResourceManager(backend)
+    selected_backend = _resolve_backend(backend)
+    backend_desc = selected_backend if selected_backend is not None else "system-default"
+    print(f"Using VISA backend: {backend_desc}")
+    rm = _open_resource_manager(selected_backend)
     resources = tuple(rm.list_resources())
     if not resources:
         raise RuntimeError("No VISA instruments detected.")

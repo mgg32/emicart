@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -6,13 +8,17 @@ from emicart.instruments import tektronix
 
 
 class FakeScope:
-    def __init__(self, query_values=None, fail_writes=None):
+    def __init__(self, query_values=None, fail_writes=None, read_value="", fail_query_commands=None):
         self.query_values = dict(query_values or {})
         self.fail_writes = set(fail_writes or [])
+        self.fail_query_commands = set(fail_query_commands or [])
+        self.read_value = read_value
         self.writes = []
         self.binary_calls = []
 
     def query(self, command):
+        if command in self.fail_query_commands:
+            raise RuntimeError(f"failed query: {command}")
         if command not in self.query_values:
             raise RuntimeError(f"unsupported query: {command}")
         value = self.query_values[command]
@@ -24,6 +30,9 @@ class FakeScope:
         self.writes.append(command)
         if command in self.fail_writes:
             raise RuntimeError(f"failed write: {command}")
+
+    def read(self):
+        return self.read_value
 
     def query_binary_values(self, command, datatype, container):
         self.binary_calls.append((command, datatype, container))
@@ -58,6 +67,23 @@ class TektronixHelperTests(unittest.TestCase):
             }
         )
         self.assertEqual(tektronix.get_record_length(scope), 2000)
+
+
+    def test_is_tektronix_scope_falls_back_to_write_read(self):
+        scope = FakeScope(
+            query_values={},
+            fail_query_commands={"*IDN?"},
+            read_value="TEKTRONIX,MSO46,ABC123,1.2.3\n",
+        )
+        is_tek, idn = tektronix._is_tektronix_scope(scope)
+        self.assertTrue(is_tek)
+        self.assertIn("MSO46", idn)
+
+    def test_resolve_backend_prefers_environment(self):
+        with mock.patch.dict(os.environ, {"EMICART_VISA_BACKEND": "ni"}, clear=False):
+            self.assertIsNone(tektronix._resolve_backend("@py"))
+        with mock.patch.dict(os.environ, {"EMICART_VISA_BACKEND": "@py"}, clear=False):
+            self.assertEqual(tektronix._resolve_backend(None), "@py")
 
     def test_get_scope_data_supports_16bit_waveforms(self):
         scope = FakeScope(
