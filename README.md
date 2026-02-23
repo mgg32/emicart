@@ -8,6 +8,9 @@ Run the GUI with:
 
 - `python -m emicart`
 
+Scope selection defaults to automatic VISA discovery. If multiple instruments are connected, set
+`EMICART_SCOPE_RESOURCE` to force a specific Tektronix resource string.
+
 ## Data Formats
 
 Export supports:

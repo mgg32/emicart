@@ -6,11 +6,13 @@ import numpy as np
 import pyvisa
 
 
-DEFAULT_RESOURCE = "USB0::0x0699::0x0105::SGVJ011062::INSTR"
+DEFAULT_RESOURCE = None
 DEFAULT_BACKEND = "@py"
 DEFAULT_OPEN_TIMEOUT_MS = 3000
 DEFAULT_IO_TIMEOUT_MS = 5000
 DEFAULT_MAX_POINTS = 1_000_000
+
+WAVEFORM_METADATA_ATTR = "_emicart_waveform_metadata"
 
 
 def _prioritized_candidates(resources):
@@ -58,6 +60,117 @@ def _is_tektronix_scope(scope):
     return ("TEKTRONIX" in idn.upper()), idn
 
 
+def _parse_idn(idn):
+    text = (idn or "").strip()
+    parts = [p.strip() for p in text.split(",")]
+    vendor = parts[0] if len(parts) >= 1 else ""
+    model = parts[1] if len(parts) >= 2 else ""
+    serial = parts[2] if len(parts) >= 3 else ""
+    firmware = parts[3] if len(parts) >= 4 else ""
+
+    model_upper = model.upper()
+    is_mso4_family = model_upper.startswith("MSO4")
+    return {
+        "raw": text,
+        "vendor": vendor,
+        "model": model,
+        "serial": serial,
+        "firmware": firmware,
+        "supports_wfmo_namespace": is_mso4_family,
+        "prefers_16bit_waveform": is_mso4_family,
+    }
+
+
+def _query_first(scope, commands, parser=lambda x: x):
+    last_error = None
+    for command in commands:
+        try:
+            return parser(scope.query(command)), command
+        except Exception as e:
+            last_error = e
+    if last_error is None:
+        raise RuntimeError("No query commands provided.")
+    raise last_error
+
+
+def _write_first(scope, commands):
+    last_error = None
+    for command in commands:
+        try:
+            scope.write(command)
+            return command
+        except Exception as e:
+            last_error = e
+    if last_error is None:
+        raise RuntimeError("No write commands provided.")
+    raise last_error
+
+
+def _read_waveform_metadata(scope):
+    metadata = getattr(scope, WAVEFORM_METADATA_ATTR, None)
+    if metadata is not None:
+        return metadata
+
+    try:
+        model_upper = str(getattr(scope, "_emicart_idn_info", {}).get("model", "")).upper()
+    except Exception:
+        model_upper = ""
+    prefers_wfmo = model_upper.startswith("MSO4")
+
+    bytenr_order = ["WFMO:BYT_N?", "WFMPRE:BYT_NR?"]
+    if not prefers_wfmo:
+        bytenr_order = ["WFMPRE:BYT_NR?", "WFMO:BYT_N?"]
+    byte_width, _ = _query_first(scope, bytenr_order, parser=lambda v: int(float(v)))
+    byte_width = 2 if int(byte_width) >= 2 else 1
+
+    float_parser = lambda v: float(v)
+    ymult, ymult_cmd = _query_first(scope, ["WFMO:YMULT?", "WFMPRE:YMULT?"] if prefers_wfmo else ["WFMPRE:YMULT?", "WFMO:YMULT?"], parser=float_parser)
+    yzero, yzero_cmd = _query_first(scope, ["WFMO:YZERO?", "WFMPRE:YZERO?"] if prefers_wfmo else ["WFMPRE:YZERO?", "WFMO:YZERO?"], parser=float_parser)
+    yoff, yoff_cmd = _query_first(scope, ["WFMO:YOFF?", "WFMPRE:YOFF?"] if prefers_wfmo else ["WFMPRE:YOFF?", "WFMO:YOFF?"], parser=float_parser)
+    xincr, xincr_cmd = _query_first(scope, ["WFMO:XINCR?", "WFMPRE:XINCR?"] if prefers_wfmo else ["WFMPRE:XINCR?", "WFMO:XINCR?"], parser=float_parser)
+
+    metadata = {
+        "byte_width": byte_width,
+        "datatype": "h" if byte_width == 2 else "b",
+        "ymult": ymult,
+        "yzero": yzero,
+        "yoff": yoff,
+        "xincr": xincr,
+        "commands": {
+            "ymult": ymult_cmd,
+            "yzero": yzero_cmd,
+            "yoff": yoff_cmd,
+            "xincr": xincr_cmd,
+        },
+    }
+    setattr(scope, WAVEFORM_METADATA_ATTR, metadata)
+    return metadata
+
+
+def _get_record_length(scope, default_points):
+    try:
+        value, _ = _query_first(
+            scope,
+            ["HORIZONTAL:RECORDLENGTH?", "HOR:RECO?"],
+            parser=lambda v: int(float(v)),
+        )
+        return int(value)
+    except Exception:
+        try:
+            value, _ = _query_first(
+                scope,
+                ["WFMO:NR_PT?", "WFMPRE:NR_PT?"],
+                parser=lambda v: int(float(v)),
+            )
+            return int(value)
+        except Exception:
+            return int(default_points)
+
+
+def get_record_length(scope):
+    return _get_record_length(scope, DEFAULT_MAX_POINTS)
+
+
 def connect_to_scope(
     resource_str=None,
     backend=DEFAULT_BACKEND,
@@ -92,7 +205,10 @@ def connect_to_scope(
             raise RuntimeError(
                 f"Connected to non-Tek instrument at {preferred}: {idn or 'No IDN response'}"
             )
+        info = _parse_idn(idn)
+        scope._emicart_idn_info = info
         print(f"Connected to: {idn}")
+        print(f"Detected Tek model: {info['model'] or 'Unknown'} (firmware {info['firmware'] or 'unknown'})")
         return scope
 
     candidates = _prioritized_candidates(resources)
@@ -117,8 +233,14 @@ def connect_to_scope(
                 errors.append(f"{candidate}: not Tektronix ({idn or 'no IDN'})")
                 scope.close()
                 continue
+            info = _parse_idn(idn)
+            scope._emicart_idn_info = info
             scope.timeout = io_timeout_ms
             print(f"Connected to: {idn}")
+            print(
+                f"Detected Tek model: {info['model'] or 'Unknown'} "
+                f"(firmware {info['firmware'] or 'unknown'})"
+            )
             return scope
         except Exception as e:
             errors.append(f"{candidate}: {e}")
@@ -144,44 +266,49 @@ def setup_scope(scope):
 
 
 def configure_timebase(scope, time_per_div, record_length):
-    scope.write(f"HOR:MAIN:SCALE {time_per_div}")
-    scope.write(f"HOR:RECO {record_length}")
+    _write_first(
+        scope,
+        [
+            f"HORIZONTAL:SCALE {time_per_div}",
+            f"HOR:MAIN:SCALE {time_per_div}",
+        ],
+    )
+    _write_first(
+        scope,
+        [
+            f"HORIZONTAL:RECORDLENGTH {record_length}",
+            f"HOR:RECO {record_length}",
+        ],
+    )
     time.sleep(0.5)
 
 
 def download_waveform(scope, channel="CH1", num_points=10000):
     scope.write(f"DATA:SOURCE {channel}")
     scope.write("DATA:ENCdg RIBinary")
-    scope.write("DATA:WIDTH 1")
     scope.write("DATA:START 1")
     scope.write(f"DATA:STOP {num_points}")
 
-    ymult = float(scope.query("WFMPRE:YMULT?"))
-    yzero = float(scope.query("WFMPRE:YZERO?"))
-    yoff = float(scope.query("WFMPRE:YOFF?"))
+    metadata = _read_waveform_metadata(scope)
+    scope.write(f"DATA:WIDTH {metadata['byte_width']}")
 
-    raw = scope.query_binary_values("CURVE?", datatype="b", container=np.array)
-    volts = (raw - yoff) * ymult + yzero
+    raw = scope.query_binary_values("CURVE?", datatype=metadata["datatype"], container=np.array)
+    volts = (raw - metadata["yoff"]) * metadata["ymult"] + metadata["yzero"]
     return volts
 
 
 def get_scope_data(scope, max_points=DEFAULT_MAX_POINTS):
     scope.write("DATA:SOURCE CH1")
     scope.write("DATA:ENCdg RIBinary")
-    scope.write("DATA:WIDTH 1")
     scope.write("DATA:START 1")
-    try:
-        n_points = int(float(scope.query("WFMPRE:NR_PT?")))
-    except Exception:
-        n_points = max_points
+    n_points = _get_record_length(scope, max_points)
     n_points = max(1, min(int(n_points), int(max_points)))
     scope.write(f"DATA:STOP {n_points}")
 
-    ymult = float(scope.query("WFMPRE:YMULT?"))
-    yzero = float(scope.query("WFMPRE:YZERO?"))
-    yoff = float(scope.query("WFMPRE:YOFF?"))
-    dt = float(scope.query("WFMPRE:XINCR?"))
+    metadata = _read_waveform_metadata(scope)
+    scope.write(f"DATA:WIDTH {metadata['byte_width']}")
 
-    raw = scope.query_binary_values("CURVE?", datatype="b", container=np.array)
-    volts = (raw - yoff) * ymult + yzero
+    raw = scope.query_binary_values("CURVE?", datatype=metadata["datatype"], container=np.array)
+    volts = (raw - metadata["yoff"]) * metadata["ymult"] + metadata["yzero"]
+    dt = metadata["xincr"]
     return volts, dt
