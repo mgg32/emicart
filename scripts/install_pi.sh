@@ -55,7 +55,7 @@ if [ "$PILLOW_OK" -ne 1 ]; then
 fi
 
 # Runtime deps used by the GUI/instrument path.
-python -m pip install --prefer-binary --extra-index-url "$PIWHEELS_URL" numpy "matplotlib<3.10" scipy pyvisa pyvisa-py psutil zeroconf
+python -m pip install --prefer-binary --extra-index-url "$PIWHEELS_URL" numpy "matplotlib<3.10" scipy pyvisa pyvisa-py pyusb psutil zeroconf
 
 # Install project package.
 python -m pip install .

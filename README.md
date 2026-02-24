@@ -60,7 +60,7 @@ The install script:
 
 - Installs OS packages (`python3-venv`, `python3-pip`, `python3-tk`, `libatlas-base-dev`)
 - Creates `.venv`
-- Installs runtime Python deps (`numpy`, `matplotlib`, `scipy`, `pyvisa`, `pyvisa-py`, `psutil`, `zeroconf`)
+- Installs runtime Python deps (`numpy`, `matplotlib`, `scipy`, `pyvisa`, `pyvisa-py`, `pyusb`, `psutil`, `zeroconf`)
 - Installs this package (`pip install .`)
 - Creates launchers at `~/Desktop/EmiCart.desktop` and `~/.local/share/applications/EmiCart.desktop`
 
@@ -94,7 +94,7 @@ The install script:
 
 - Creates `.venv`
 - Upgrades `pip`
-- Installs runtime Python deps (`numpy`, `matplotlib`, `scipy`, `pyvisa`, `pyvisa-py`, `psutil`, `zeroconf`)
+- Installs runtime Python deps (`numpy`, `matplotlib`, `scipy`, `pyvisa`, `pyvisa-py`, `pyusb`, `psutil`, `zeroconf`)
 - Installs this package (`pip install .`)
 - Creates a Desktop shortcut (`EmiCart.lnk`)
 

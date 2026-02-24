@@ -25,7 +25,7 @@ Write-Host "Upgrading pip..."
 & $venvPython -m pip install --upgrade pip
 
 Write-Host "Installing runtime dependencies..."
-& $venvPython -m pip install numpy matplotlib scipy pyvisa pyvisa-py psutil zeroconf
+& $venvPython -m pip install numpy matplotlib scipy pyvisa pyvisa-py pyusb psutil zeroconf
 
 Write-Host "Installing EmiCart package..."
 & $venvPython -m pip install .
