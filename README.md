@@ -58,6 +58,15 @@ Recommended on Raspberry Pi OS (Bookworm/Bullseye):
 
 The install script:
 
+- Installs/updates `/etc/udev/rules.d/99-usbtmc.rules` for Tektronix USBTMC access, then reloads udev rules (requires elevated privileges via root/sudo).
+  - If `sudo` is unavailable, run this manually from a root shell:
+
+    ```bash
+    cat >/etc/udev/rules.d/99-usbtmc.rules <<'EOF'
+    SUBSYSTEM=="usb", ATTRS{idVendor}=="0699", MODE="0666", GROUP="plugdev", RUN+="/bin/sh -c 'echo %k > /sys/bus/usb/drivers/usbtmc/unbind'"
+    EOF
+    udevadm control --reload-rules && udevadm trigger
+    ```
 - Installs OS packages (`python3-venv`, `python3-pip`, `python3-tk`, `libatlas-base-dev`)
 - Creates `.venv`
 - Installs runtime Python deps (`numpy`, `matplotlib`, `scipy`, `pyvisa`, `pyvisa-py`, `pyusb`, `psutil`, `zeroconf`)
