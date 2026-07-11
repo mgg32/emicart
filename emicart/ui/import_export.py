@@ -1,11 +1,32 @@
 from __future__ import annotations
 
+import json
 from csv import reader as csv_reader
 from csv import writer as csv_writer
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
+
+
+def _normalize_probe_units(units) -> str:
+    """Map the former linear E-field label to the current logarithmic unit."""
+    text = str(units or "").strip()
+    return "dBuV/m" if text == "V/m" else text
+
+
+def _correction_factors_json(trace: dict) -> str:
+    return json.dumps(trace.get("probe_frequency_correction_factors", []), separators=(",", ":"))
+
+
+def _parse_correction_factors(value) -> list:
+    try:
+        parsed = json.loads(str(value))
+        if isinstance(parsed, list) and all(isinstance(p, (list, tuple)) and len(p) == 2 for p in parsed):
+            return [[float(p[0]), float(p[1])] for p in parsed]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return []
 
 
 def build_binary_payload(
@@ -36,6 +57,13 @@ def build_binary_payload(
         "trace_probe_v_per_m_gain": np.array(
             [np.nan if t.get("probe_v_per_m_gain") is None else float(t.get("probe_v_per_m_gain")) for t in traces],
             dtype=float,
+        ),
+        "trace_probe_frequency_corrections": np.array([_correction_factors_json(t) for t in traces], dtype=object),
+        "trace_probe_min_frequency_hz": np.array(
+            [np.nan if t.get("probe_min_frequency_hz") is None else float(t["probe_min_frequency_hz"]) for t in traces], dtype=float
+        ),
+        "trace_probe_max_frequency_hz": np.array(
+            [np.nan if t.get("probe_max_frequency_hz") is None else float(t["probe_max_frequency_hz"]) for t in traces], dtype=float
         ),
         "trace_freqs_hz": np.array([np.asarray(t["freqs"], dtype=float) for t in traces], dtype=object),
         "trace_original_dbuv": np.array([np.asarray(t["original"], dtype=float) for t in traces], dtype=object),
@@ -76,6 +104,9 @@ def write_csv_export(
                 "Frequency(Hz)",
                 "OriginalFFT(dBuV)",
                 "WindowedFFT(dBuV)",
+                "ProbeCorrectionFactorsJson",
+                "ProbeMinFrequencyHz",
+                "ProbeMaxFrequencyHz",
             ]
         )
         for trace in traces:
@@ -94,6 +125,9 @@ def write_csv_export(
                         f"{trace['freqs'][i]:.12g}",
                         f"{trace['original'][i]:.12g}",
                         f"{trace['windowed'][i]:.12g}",
+                        _correction_factors_json(trace),
+                        "" if trace.get("probe_min_frequency_hz") is None else f"{trace['probe_min_frequency_hz']:.12g}",
+                        "" if trace.get("probe_max_frequency_hz") is None else f"{trace['probe_max_frequency_hz']:.12g}",
                     ]
                 )
 
@@ -111,6 +145,9 @@ def write_csv_export(
                 "SampleRate(Hz)",
                 "SampleIndex",
                 "Voltage(V)",
+                "ProbeCorrectionFactorsJson",
+                "ProbeMinFrequencyHz",
+                "ProbeMaxFrequencyHz",
             ]
         )
         for trace in traces:
@@ -133,6 +170,9 @@ def write_csv_export(
                         sample_rate_text,
                         str(idx),
                         f"{float(v):.12g}",
+                        _correction_factors_json(trace),
+                        "" if trace.get("probe_min_frequency_hz") is None else f"{trace['probe_min_frequency_hz']:.12g}",
+                        "" if trace.get("probe_max_frequency_hz") is None else f"{trace['probe_max_frequency_hz']:.12g}",
                     ]
                 )
 
@@ -167,6 +207,9 @@ def read_npz_import(path: str) -> Tuple[Dict[str, str], List[dict]]:
     trace_probe_units = np.atleast_1d(data.get("trace_probe_units", np.array([], dtype=object)))
     trace_probe_imps = np.atleast_1d(data.get("trace_probe_impedance_ohms", np.array([], dtype=float)))
     trace_probe_gains = np.atleast_1d(data.get("trace_probe_v_per_m_gain", np.array([], dtype=float)))
+    trace_probe_corrections = np.atleast_1d(data.get("trace_probe_frequency_corrections", np.array([], dtype=object)))
+    trace_probe_mins = np.atleast_1d(data.get("trace_probe_min_frequency_hz", np.array([], dtype=float)))
+    trace_probe_maxes = np.atleast_1d(data.get("trace_probe_max_frequency_hz", np.array([], dtype=float)))
     trace_freqs = np.atleast_1d(data.get("trace_freqs_hz", np.array([], dtype=object)))
     trace_original = np.atleast_1d(data.get("trace_original_dbuv", np.array([], dtype=object)))
     trace_windowed = np.atleast_1d(data.get("trace_windowed_dbuv", np.array([], dtype=object)))
@@ -192,9 +235,12 @@ def read_npz_import(path: str) -> Tuple[Dict[str, str], List[dict]]:
             "effective_rbw_hz": rbw_val,
             "color": str(trace_colors[i]) if i < len(trace_colors) else "",
             "probe_name": str(trace_probe_names[i]) if i < len(trace_probe_names) else "",
-            "probe_units": str(trace_probe_units[i]) if i < len(trace_probe_units) else "",
+            "probe_units": _normalize_probe_units(trace_probe_units[i]) if i < len(trace_probe_units) else "",
             "probe_impedance_ohms": imp_val,
             "probe_v_per_m_gain": gain_val,
+            "probe_frequency_correction_factors": _parse_correction_factors(trace_probe_corrections[i]) if i < len(trace_probe_corrections) else [],
+            "probe_min_frequency_hz": _optional_float(trace_probe_mins, i),
+            "probe_max_frequency_hz": _optional_float(trace_probe_maxes, i),
             "freqs": np.asarray(trace_freqs[i], dtype=float) if i < len(trace_freqs) else np.array([], dtype=float),
             "original": np.asarray(trace_original[i], dtype=float) if i < len(trace_original) else np.array([], dtype=float),
             "windowed": np.asarray(trace_windowed[i], dtype=float) if i < len(trace_windowed) else np.array([], dtype=float),
@@ -217,6 +263,9 @@ def read_mat_import(path: str) -> Tuple[Dict[str, str], List[dict]]:
     trace_probe_units = _as_list(mat.get("trace_probe_units"))
     trace_probe_imps = _as_list(mat.get("trace_probe_impedance_ohms"))
     trace_probe_gains = _as_list(mat.get("trace_probe_v_per_m_gain"))
+    trace_probe_corrections = _as_list(mat.get("trace_probe_frequency_corrections"))
+    trace_probe_mins = _as_list(mat.get("trace_probe_min_frequency_hz"))
+    trace_probe_maxes = _as_list(mat.get("trace_probe_max_frequency_hz"))
     trace_freqs = _as_list(mat.get("trace_freqs_hz"))
     trace_original = _as_list(mat.get("trace_original_dbuv"))
     trace_windowed = _as_list(mat.get("trace_windowed_dbuv"))
@@ -247,9 +296,12 @@ def read_mat_import(path: str) -> Tuple[Dict[str, str], List[dict]]:
             "effective_rbw_hz": _optional_float(trace_rbws, i),
             "color": str(trace_colors[i]) if i < len(trace_colors) else "",
             "probe_name": str(trace_probe_names[i]) if i < len(trace_probe_names) else "",
-            "probe_units": str(trace_probe_units[i]) if i < len(trace_probe_units) else "",
+            "probe_units": _normalize_probe_units(trace_probe_units[i]) if i < len(trace_probe_units) else "",
             "probe_impedance_ohms": _optional_float(trace_probe_imps, i),
             "probe_v_per_m_gain": _optional_float(trace_probe_gains, i),
+            "probe_frequency_correction_factors": _parse_correction_factors(trace_probe_corrections[i]) if i < len(trace_probe_corrections) else [],
+            "probe_min_frequency_hz": _optional_float(trace_probe_mins, i),
+            "probe_max_frequency_hz": _optional_float(trace_probe_maxes, i),
             "freqs": _trace_array(trace_freqs, i),
             "original": _trace_array(trace_original, i),
             "windowed": _trace_array(trace_windowed, i),
@@ -304,6 +356,9 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                 probe_imp = row[6].strip()
                 probe_gain = row[7].strip()
                 freq_idx, orig_idx, win_idx = 8, 9, 10
+                probe_corrections = row[11].strip() if len(row) >= 14 else ""
+                probe_min = row[12].strip() if len(row) >= 14 else ""
+                probe_max = row[13].strip() if len(row) >= 14 else ""
             else:
                 probe_name = default_probe_snapshot.get("probe_name", "")
                 probe_units = default_probe_snapshot.get("probe_units", "")
@@ -311,6 +366,9 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                 probe_gain_value = default_probe_snapshot.get("probe_v_per_m_gain")
                 probe_imp = "" if probe_imp_value is None else str(probe_imp_value)
                 probe_gain = "" if probe_gain_value is None else str(probe_gain_value)
+                probe_corrections = ""
+                probe_min = ""
+                probe_max = ""
                 freq_idx, orig_idx, win_idx = 4, 5, 6
             try:
                 freq = float(row[freq_idx])
@@ -328,6 +386,9 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                 probe_units,
                 probe_imp,
                 probe_gain,
+                probe_corrections,
+                probe_min,
+                probe_max,
             )
             grouped.setdefault(key, {"freqs": [], "orig": [], "win": []})
             grouped[key]["freqs"].append(freq)
@@ -348,6 +409,9 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                     probe_imp = row[6].strip()
                     probe_gain = row[7].strip()
                     sample_rate_idx, sample_idx_idx, voltage_idx = 8, 9, 10
+                    probe_corrections = row[11].strip() if len(row) >= 14 else ""
+                    probe_min = row[12].strip() if len(row) >= 14 else ""
+                    probe_max = row[13].strip() if len(row) >= 14 else ""
                 else:
                     probe_name = default_probe_snapshot.get("probe_name", "")
                     probe_units = default_probe_snapshot.get("probe_units", "")
@@ -355,6 +419,9 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                     probe_gain_value = default_probe_snapshot.get("probe_v_per_m_gain")
                     probe_imp = "" if probe_imp_value is None else str(probe_imp_value)
                     probe_gain = "" if probe_gain_value is None else str(probe_gain_value)
+                    probe_corrections = ""
+                    probe_min = ""
+                    probe_max = ""
                     sample_rate_idx, sample_idx_idx, voltage_idx = 4, 5, 6
                 key = (
                     label,
@@ -365,6 +432,9 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                     probe_units,
                     probe_imp,
                     probe_gain,
+                    probe_corrections,
+                    probe_min,
+                    probe_max,
                 )
                 try:
                     sample_rate = float(row[sample_rate_idx])
@@ -390,6 +460,9 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                 probe_units_text,
                 probe_imp_text,
                 probe_gain_text,
+                probe_corrections_text,
+                probe_min_text,
+                probe_max_text,
             ) = key
             if rbw_text in {"", "N/A"}:
                 rbw_val = None
@@ -405,8 +478,8 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                 sample_rate_val = float(wf["sample_rate"])
                 ordered = sorted(wf["samples"], key=lambda pair: pair[0])
                 volts_arr = np.array([v for _, v in ordered], dtype=float)
-            if probe_units_text in {"dBuV", "dBuA", "V/m"}:
-                parsed_probe_units = probe_units_text
+            if _normalize_probe_units(probe_units_text) in {"dBuV", "dBuA", "dBuV/m"}:
+                parsed_probe_units = _normalize_probe_units(probe_units_text)
             else:
                 parsed_probe_units = default_probe_snapshot.get("probe_units", "dBuV")
             try:
@@ -417,6 +490,12 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                 parsed_probe_gain = float(probe_gain_text) if probe_gain_text.strip() else None
             except ValueError:
                 parsed_probe_gain = None
+            try:
+                parsed_probe_min = float(probe_min_text) if probe_min_text.strip() else None
+                parsed_probe_max = float(probe_max_text) if probe_max_text.strip() else None
+            except ValueError:
+                parsed_probe_min = None
+                parsed_probe_max = None
             if probe_name_text.strip():
                 parsed_probe_name = probe_name_text.strip()
             else:
@@ -435,6 +514,9 @@ def read_csv_import(path: str, default_probe_snapshot: dict) -> Tuple[Dict[str, 
                 "probe_units": parsed_probe_units,
                 "probe_impedance_ohms": parsed_probe_imp,
                 "probe_v_per_m_gain": parsed_probe_gain,
+                "probe_frequency_correction_factors": _parse_correction_factors(probe_corrections_text),
+                "probe_min_frequency_hz": parsed_probe_min,
+                "probe_max_frequency_hz": parsed_probe_max,
             }
             traces.append(trace)
         return metadata, traces

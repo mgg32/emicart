@@ -1,19 +1,30 @@
 import json
 import logging
 import math
+import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
-SUPPORTED_PROBE_UNITS = {"dBuV", "dBuA", "V/m"}
+SUPPORTED_PROBE_UNITS = {"dBuV", "dBuA", "dBuV/m", "V/m"}  # V/m is accepted only for legacy migration.
 
 @dataclass(frozen=True)
 class Probe:
     name: str
     measured_units: str
     impedance_ohms: Optional[float] = None
-    volts_to_v_per_m_gain: Optional[float] = None
+    # (frequency in Hz, additive correction in dB).  For an antenna this is
+    # normally the antenna factor in dB/m.
+    frequency_correction_factors: Tuple[Tuple[float, float], ...] = ()
+    min_frequency_hz: Optional[float] = None
+    max_frequency_hz: Optional[float] = None
+
+    def supports_frequency(self, frequency_hz: float) -> bool:
+        return (
+            (self.min_frequency_hz is None or frequency_hz >= self.min_frequency_hz)
+            and (self.max_frequency_hz is None or frequency_hz <= self.max_frequency_hz)
+        )
     description: str = ""
 
     def can_convert(self, from_units: str, to_units: str) -> bool:
@@ -22,8 +33,8 @@ class Probe:
         pair = {from_units, to_units}
         if pair == {"dBuV", "dBuA"}:
             return self.impedance_ohms is not None and self.impedance_ohms > 0
-        if from_units == "dBuV" and to_units == "V/m":
-            return self.volts_to_v_per_m_gain is not None and self.volts_to_v_per_m_gain > 0
+        if from_units == "dBuV" and to_units == "dBuV/m":
+            return bool(self.frequency_correction_factors)
         return False
 
     def convert_db_level(self, value_db: float, from_units: str, to_units: str) -> float:
@@ -41,16 +52,14 @@ class Probe:
                 return value_db - offset
             return value_db + offset
 
-        if from_units == "dBuV" and to_units == "V/m":
-            if self.volts_to_v_per_m_gain is None or self.volts_to_v_per_m_gain <= 0:
-                raise ValueError(
-                    f"Probe '{self.name}' requires a positive V->V/m gain to convert "
-                    f"{from_units} to {to_units}."
-                )
-            volts = 1e-6 * (10.0 ** (value_db / 20.0))
-            return volts * self.volts_to_v_per_m_gain
-
         raise ValueError(f"Unsupported unit conversion: {from_units} -> {to_units}")
+
+    def correction_db_at(self, frequency_hz: float) -> float:
+        """Return the additive dB correction, linearly interpolated by frequency."""
+        if self.frequency_correction_factors:
+            frequencies, corrections = zip(*self.frequency_correction_factors)
+            return float(np.interp(float(frequency_hz), frequencies, corrections))
+        return 0.0
 
 
 def _get_probe_store_path() -> Path:
@@ -99,7 +108,9 @@ def _probe_to_dict(probe: Probe) -> dict:
         "name": probe.name,
         "measured_units": probe.measured_units,
         "impedance_ohms": probe.impedance_ohms,
-        "volts_to_v_per_m_gain": probe.volts_to_v_per_m_gain,
+        "frequency_correction_factors": [list(point) for point in probe.frequency_correction_factors],
+        "min_frequency_hz": probe.min_frequency_hz,
+        "max_frequency_hz": probe.max_frequency_hz,
         "description": probe.description,
     }
 
@@ -121,26 +132,60 @@ def _dict_to_probe(raw: dict) -> Optional[Probe]:
             return None
     if impedance_ohms is not None and impedance_ohms <= 0:
         return None
-    gain_raw = raw.get("volts_to_v_per_m_gain", None)
-    if gain_raw in ("", None):
-        volts_to_v_per_m_gain = None
-    else:
+    factors_raw = raw.get("frequency_correction_factors", [])
+    if factors_raw is None:
+        factors_raw = []
+    if not isinstance(factors_raw, list):
+        return None
+    factors = []
+    for point in factors_raw:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            return None
         try:
-            volts_to_v_per_m_gain = float(gain_raw)
+            frequency, factor = float(point[0]), float(point[1])
         except (TypeError, ValueError):
             return None
-    if volts_to_v_per_m_gain is not None and volts_to_v_per_m_gain <= 0:
+        if frequency <= 0:
+            return None
+        factors.append((frequency, factor))
+    factors.sort()
+    if any(a[0] == b[0] for a, b in zip(factors, factors[1:])):
+        return None
+    def optional_frequency(key):
+        value = raw.get(key)
+        if value in (None, ""):
+            return None
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+    min_frequency_hz = optional_frequency("min_frequency_hz")
+    max_frequency_hz = optional_frequency("max_frequency_hz")
+    if min_frequency_hz is not None and max_frequency_hz is not None and min_frequency_hz >= max_frequency_hz:
         return None
     if measured_units == "dBuA" and (impedance_ohms is None or impedance_ohms <= 0):
         return None
-    if measured_units == "V/m" and (volts_to_v_per_m_gain is None or volts_to_v_per_m_gain <= 0):
-        return None
+    # Upgrade the first implementation's linear V/m-per-V field to an
+    # equivalent one-point antenna factor in dBµV/m.
+    if measured_units == "V/m":
+        gain = raw.get("volts_to_v_per_m_gain")
+        try:
+            gain = float(gain)
+        except (TypeError, ValueError):
+            return None
+        if gain <= 0:
+            return None
+        measured_units = "dBuV/m"
+        factors = [(1.0, 20.0 * math.log10(gain))]
     description = str(raw.get("description", "")).strip()
     return Probe(
         name=name,
         measured_units=measured_units,
         impedance_ohms=impedance_ohms,
-        volts_to_v_per_m_gain=volts_to_v_per_m_gain,
+        frequency_correction_factors=tuple(factors),
+        min_frequency_hz=min_frequency_hz,
+        max_frequency_hz=max_frequency_hz,
         description=description,
     )
 
@@ -226,7 +271,9 @@ def upsert_probe(
     name: str,
     measured_units: str,
     impedance_ohms: Optional[float] = None,
-    volts_to_v_per_m_gain: Optional[float] = None,
+    frequency_correction_factors: Sequence[Tuple[float, float]] = (),
+    min_frequency_hz: Optional[float] = None,
+    max_frequency_hz: Optional[float] = None,
     description: str = "",
 ) -> Probe:
     probe_name = (name or "").strip()
@@ -234,29 +281,37 @@ def upsert_probe(
     if not probe_name:
         raise ValueError("Probe name is required.")
     if units not in SUPPORTED_PROBE_UNITS:
-        raise ValueError("Units must be one of: dBuV, dBuA, V/m.")
+        raise ValueError("Units must be one of: dBuV, dBuA, dBuV/m.")
     if units == "dBuA":
         if impedance_ohms is None:
             raise ValueError("dBuA probes require impedance (ohms).")
         if impedance_ohms <= 0:
             raise ValueError("Probe impedance must be > 0 ohms.")
-    if units == "V/m":
-        if volts_to_v_per_m_gain is None:
-            raise ValueError("V/m probes require V->V/m gain.")
-        if volts_to_v_per_m_gain <= 0:
-            raise ValueError("V->V/m gain must be > 0.")
+    try:
+        factors = tuple(sorted((float(frequency), float(factor)) for frequency, factor in frequency_correction_factors))
+    except (TypeError, ValueError):
+        raise ValueError("Each correction factor must contain numeric frequency and factor values.")
+    if any(frequency <= 0 for frequency, _ in factors):
+        raise ValueError("Correction frequencies must be > 0.")
+    if any(a[0] == b[0] for a, b in zip(factors, factors[1:])):
+        raise ValueError("Correction frequencies must be unique.")
+    for label, value in (("Minimum frequency", min_frequency_hz), ("Maximum frequency", max_frequency_hz)):
+        if value is not None and value <= 0:
+            raise ValueError(f"{label} must be > 0 Hz.")
+    if min_frequency_hz is not None and max_frequency_hz is not None and min_frequency_hz >= max_frequency_hz:
+        raise ValueError("Minimum frequency must be below maximum frequency.")
     elif impedance_ohms is not None and impedance_ohms <= 0:
         raise ValueError("Probe impedance must be > 0 ohms.")
     if impedance_ohms is not None and impedance_ohms <= 0:
         raise ValueError("Probe impedance must be > 0 ohms.")
-    if volts_to_v_per_m_gain is not None and volts_to_v_per_m_gain <= 0:
-        raise ValueError("V->V/m gain must be > 0.")
 
     probe = Probe(
         name=probe_name,
         measured_units=units,
         impedance_ohms=impedance_ohms,
-        volts_to_v_per_m_gain=volts_to_v_per_m_gain,
+        frequency_correction_factors=factors,
+        min_frequency_hz=min_frequency_hz,
+        max_frequency_hz=max_frequency_hz,
         description=(description or "").strip(),
     )
     _probe_registry[probe_name] = probe

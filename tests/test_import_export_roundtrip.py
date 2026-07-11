@@ -115,6 +115,44 @@ class ImportExportRoundtripTests(unittest.TestCase):
             self.assertEqual(meta_mat.get("Standard"), "No Standard")
             self._assert_trace(traces_mat)
 
+    def test_npz_preserves_probe_calibration_and_migrates_legacy_e_field_unit(self):
+        traces = self._sample_traces()
+        traces[0].update(
+            {
+                "probe_units": "dBuV/m",
+                "probe_frequency_correction_factors": [[1e6, 12.0], [2e6, 18.0]],
+                "probe_min_frequency_hz": 9e3,
+                "probe_max_frequency_hz": 30e6,
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "calibrated.npz"
+            np.savez_compressed(path, **build_binary_payload(traces, "", "", "", ""))
+            _, imported = read_npz_import(str(path))
+            self.assertEqual(imported[0]["probe_units"], "dBuV/m")
+            self.assertEqual(imported[0]["probe_frequency_correction_factors"], [[1e6, 12.0], [2e6, 18.0]])
+            self.assertEqual(imported[0]["probe_min_frequency_hz"], 9e3)
+            self.assertEqual(imported[0]["probe_max_frequency_hz"], 30e6)
+
+    def test_csv_preserves_probe_calibration_and_range(self):
+        traces = self._sample_traces()
+        traces[0].update(
+            {
+                "probe_units": "dBuV/m",
+                "probe_frequency_correction_factors": [[1e6, 12.0], [2e6, 18.0]],
+                "probe_min_frequency_hz": 9e3,
+                "probe_max_frequency_hz": 30e6,
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "calibrated.csv"
+            write_csv_export(path, traces, "", "", "", "")
+            _, imported = read_csv_import(str(path), default_probe_snapshot={})
+            self.assertEqual(imported[0]["probe_units"], "dBuV/m")
+            self.assertEqual(imported[0]["probe_frequency_correction_factors"], [[1e6, 12.0], [2e6, 18.0]])
+            self.assertEqual(imported[0]["probe_min_frequency_hz"], 9e3)
+            self.assertEqual(imported[0]["probe_max_frequency_hz"], 30e6)
+
 
 if __name__ == "__main__":
     unittest.main()

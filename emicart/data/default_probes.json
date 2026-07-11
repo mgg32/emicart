@@ -3,39 +3,51 @@
     "name": "Direct Voltage (No Probe)",
     "measured_units": "dBuV",
     "impedance_ohms": null,
+    "min_frequency_hz": 9000,
+    "max_frequency_hz": 30000000,
     "description": "No conversion. Scope voltage is plotted as dBuV."
   },
   {
     "name": "50 Ohm LISN / Transimpedance",
     "measured_units": "dBuA",
     "impedance_ohms": 50.0,
+    "min_frequency_hz": 9000,
+    "max_frequency_hz": 30000000,
     "description": "Converts scope dBuV to dBuA using 50 ohm transimpedance."
   },
   {
     "name": "5 Ohm Current Probe",
     "measured_units": "dBuA",
     "impedance_ohms": 5.0,
+    "min_frequency_hz": 9000,
+    "max_frequency_hz": 30000000,
     "description": "Converts scope dBuV to dBuA using 5 ohm transimpedance."
   },
   {
-    "name": "E-Field Probe (20 V/m per V)",
-    "measured_units": "V/m",
+    "name": "E-Field Probe (26 dB/m)",
+    "measured_units": "dBuV/m",
     "impedance_ohms": null,
-    "volts_to_v_per_m_gain": 20.0,
-    "description": "Converts scope voltage to electric field using 20 V/m per V gain."
+    "frequency_correction_factors": [[1000000, 26.0206]],
+    "min_frequency_hz": 9000,
+    "max_frequency_hz": 30000000,
+    "description": "Example antenna factor of 26.0206 dB/m. Replace with the probe calibration table."
   },
   {
-    "name": "E-Field Probe (100 V/m per V)",
-    "measured_units": "V/m",
+    "name": "E-Field Probe (40 dB/m)",
+    "measured_units": "dBuV/m",
     "impedance_ohms": null,
-    "volts_to_v_per_m_gain": 100.0,
-    "description": "Converts scope voltage to electric field using 100 V/m per V gain."
+    "frequency_correction_factors": [[1000000, 40.0]],
+    "min_frequency_hz": 9000,
+    "max_frequency_hz": 30000000,
+    "description": "Example antenna factor of 40 dB/m. Replace with the probe calibration table."
   },
   {
     "name": "E-Field Probe (Placeholder)",
-    "measured_units": "V/m",
+    "measured_units": "dBuV/m",
     "impedance_ohms": null,
-    "volts_to_v_per_m_gain": 1.0,
-    "description": "Placeholder electric-field probe. Update gain to your calibrated V/m per V value."
+    "frequency_correction_factors": [[1000000, 0.0]],
+    "min_frequency_hz": 9000,
+    "max_frequency_hz": 30000000,
+    "description": "Placeholder electric-field probe. Update with calibrated antenna factors in dB/m."
   }
 ]

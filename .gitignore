@@ -9,3 +9,12 @@ htmlcov/
 .venv/
 venv/
 env/
+
+# Python packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Jupyter temporary files
+.ipynb_checkpoints/
+/Interactive-1.ipynb

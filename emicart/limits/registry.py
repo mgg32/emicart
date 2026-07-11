@@ -165,6 +165,11 @@ def _dict_to_curve(raw: dict) -> Optional[Curve]:
         return None
     name = str(raw.get("name", "")).strip()
     units = str(raw.get("units", "")).strip()
+    # Earlier versions labeled electric-field limits as V/m even though the
+    # plotted values are logarithmic dBµV/m. Keep existing user standards
+    # compatible with the corrected unit name.
+    if units == "V/m":
+        units = "dBuV/m"
     breakpoints_raw = raw.get("breakpoints")
     rbw_raw = raw.get("resolution_bandwidth_hz")
     if not name or not units or not isinstance(breakpoints_raw, list) or len(breakpoints_raw) < 2:
@@ -325,6 +330,8 @@ def upsert_curve(
     std = (standard or "").strip()
     name = (curve_name or "").strip()
     units_str = (units or "").strip()
+    if units_str == "V/m":
+        units_str = "dBuV/m"
     if not std:
         raise ValueError("Standard name is required.")
     if not name:

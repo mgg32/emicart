@@ -181,8 +181,8 @@
       ]
     },
     {
-      "name": "E-Field Limit (V/m Placeholder)",
-      "units": "V/m",
+      "name": "E-Field Limit (dBuV/m Placeholder)",
+      "units": "dBuV/m",
       "breakpoints": [
         [
           1000000.0,

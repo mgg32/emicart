@@ -69,6 +69,14 @@ class RegistryAndUnitsTests(unittest.TestCase):
         self.assertTrue(limits.delete_curve("TEST-STD", "Curve A"))
         self.assertIsNone(limits.get_curve_by_name("Curve A", standard="TEST-STD"))
 
+    def test_legacy_v_per_m_limit_is_migrated_to_dbuv_per_m(self):
+        limits = importlib.import_module("emicart.limits.registry")
+        legacy = limits._dict_to_curve(
+            {"name": "Legacy E Field", "units": "V/m", "breakpoints": [[1e6, 40], [2e6, 42]]}
+        )
+        self.assertIsNotNone(legacy)
+        self.assertEqual(legacy.units, "dBuV/m")
+
     def test_units_conversion(self):
         probes = importlib.import_module("emicart.probes.registry")
         probes = importlib.reload(probes)
@@ -81,7 +89,7 @@ class RegistryAndUnitsTests(unittest.TestCase):
         expected_offset = 20.0 * np.log10(50.0)
         np.testing.assert_allclose(converted, data - expected_offset, rtol=1e-10, atol=1e-10)
 
-    def test_units_conversion_to_v_per_m(self):
+    def test_units_conversion_to_dbuv_per_m(self):
         probes = importlib.import_module("emicart.probes.registry")
         probes = importlib.reload(probes)
         units = importlib.import_module("emicart.analysis.units")
@@ -89,12 +97,32 @@ class RegistryAndUnitsTests(unittest.TestCase):
 
         probe = probes.upsert_probe(
             name="EField Probe",
-            measured_units="V/m",
-            volts_to_v_per_m_gain=10.0,
+            measured_units="dBuV/m",
+            frequency_correction_factors=[(1.0e6, 20.0)],
         )
         data = np.array([120.0], dtype=float)  # 120 dBuV == 1 V
-        converted = units.convert_trace_db(data, "dBuV", "V/m", probe)
-        np.testing.assert_allclose(converted, np.array([10.0], dtype=float), rtol=1e-10, atol=1e-10)
+        converted = units.convert_trace_db(data, "dBuV", "dBuV/m", probe, frequencies_hz=np.array([1.0e6]))
+        np.testing.assert_allclose(converted, np.array([140.0], dtype=float), rtol=1e-10, atol=1e-10)
+
+    def test_frequency_dependent_db_correction_factors(self):
+        probes = importlib.import_module("emicart.probes.registry")
+        probes = importlib.reload(probes)
+        units = importlib.import_module("emicart.analysis.units")
+        units = importlib.reload(units)
+        probe = probes.upsert_probe(
+            name="Calibrated E-Field Probe",
+            measured_units="dBuV/m",
+            frequency_correction_factors=[(1.0e6, 10.0), (3.0e6, 30.0)],
+        )
+        converted = units.convert_trace_db(
+            np.array([120.0, 120.0, 120.0]),
+            "dBuV",
+            "dBuV/m",
+            probe,
+            frequencies_hz=np.array([0.5e6, 2.0e6, 4.0e6]),
+        )
+        # Factors interpolate linearly and hold the nearest endpoint beyond the calibration range.
+        np.testing.assert_allclose(converted, np.array([130.0, 140.0, 150.0]), rtol=1e-10, atol=1e-10)
 
 
 if __name__ == "__main__":

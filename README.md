@@ -10,8 +10,12 @@ Run the GUI with:
 
 Scope selection defaults to automatic VISA discovery. If multiple instruments are connected, set
 `EMICART_SCOPE_RESOURCE` to force a specific Tektronix resource string. Set
-`EMICART_VISA_BACKEND` to choose the VISA implementation (`@py` by default, or blank/`ni` for
-system NI-VISA).
+`EMICART_VISA_BACKEND` to choose the VISA implementation (the installed system VISA driver by
+default on Windows; `@py` elsewhere). Use blank/`ni` to force system VISA, or `@py` to force
+the pure-Python backend.
+
+On Raspberry Pi OS/Ubuntu, USB scopes use the `@py` backend. Run `scripts/install_pi.sh`, which
+installs both PyVISA's Python USB dependencies and the required `libusb` system runtime.
 
 
 ## Data Formats

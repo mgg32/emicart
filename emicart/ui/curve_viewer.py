@@ -1,6 +1,7 @@
 import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
+import threading
 import warnings
 from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import List, Optional, Tuple
@@ -531,7 +532,7 @@ def main():
 
         ttk.Label(edit_frame, text="Units", style="Ui.TLabel").grid(row=2, column=0, sticky="w")
         units_var = tk.StringVar(value="dBuV")
-        units_menu = ttk.OptionMenu(edit_frame, units_var, units_var.get(), "dBuV", "dBuA", "V/m")
+        units_menu = ttk.OptionMenu(edit_frame, units_var, units_var.get(), "dBuV", "dBuA", "dBuV/m")
         units_menu.grid(row=3, column=0, sticky="ew")
         units_menu.configure(style="Ui.TMenubutton")
         units_menu["menu"].configure(font=ui_font)
@@ -553,13 +554,12 @@ def main():
         )
         impedance_entry.grid(row=5, column=0, sticky="ew")
 
-        ttk.Label(edit_frame, text="E-Field Gain (V/m per V)", style="Ui.TLabel").grid(
+        correction_label_var = tk.StringVar(value="Frequency Corrections (Hz, dB)")
+        ttk.Label(edit_frame, textvariable=correction_label_var, style="Ui.TLabel").grid(
             row=6, column=0, sticky="w"
         )
-        gain_var = tk.StringVar()
-        gain_entry = tk.Entry(
+        correction_text = tk.Text(
             edit_frame,
-            textvariable=gain_var,
             font=ui_font,
             bg=colors["entry_bg"],
             fg=colors["text_primary"],
@@ -569,10 +569,35 @@ def main():
             highlightbackground=colors["entry_border"],
             highlightcolor=colors["accent"],
             bd=0,
+            height=5,
         )
-        gain_entry.grid(row=7, column=0, sticky="ew")
+        correction_text.grid(row=7, column=0, sticky="ew")
 
-        ttk.Label(edit_frame, text="Description", style="Ui.TLabel").grid(row=8, column=0, sticky="w")
+        def refresh_correction_hint(*_):
+            if units_var.get() == "dBuV/m":
+                correction_label_var.set("Antenna Factor (Hz, dB/m)")
+            else:
+                correction_label_var.set("Frequency Corrections (Hz, dB)")
+
+        units_var.trace_add("write", refresh_correction_hint)
+
+        range_frame = ttk.Frame(edit_frame, style="CardInner.TFrame")
+        range_frame.grid(row=8, column=0, sticky="ew")
+        range_frame.columnconfigure(0, weight=1)
+        range_frame.columnconfigure(1, weight=1)
+        min_frequency_var = tk.StringVar()
+        max_frequency_var = tk.StringVar()
+        ttk.Label(range_frame, text="Min Frequency (Hz)", style="Ui.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(range_frame, text="Max Frequency (Hz)", style="Ui.TLabel").grid(row=0, column=1, sticky="w")
+        for column, variable in ((0, min_frequency_var), (1, max_frequency_var)):
+            tk.Entry(
+                range_frame, textvariable=variable, font=ui_font, bg=colors["entry_bg"],
+                fg=colors["text_primary"], insertbackground=colors["text_primary"], relief="solid",
+                highlightthickness=1, highlightbackground=colors["entry_border"],
+                highlightcolor=colors["accent"], bd=0,
+            ).grid(row=1, column=column, sticky="ew", padx=(0, 4) if column == 0 else (4, 0))
+
+        ttk.Label(edit_frame, text="Description", style="Ui.TLabel").grid(row=9, column=0, sticky="w")
         description_var = tk.StringVar()
         description_entry = tk.Entry(
             edit_frame,
@@ -587,15 +612,15 @@ def main():
             highlightcolor=colors["accent"],
             bd=0,
         )
-        description_entry.grid(row=9, column=0, sticky="ew")
+        description_entry.grid(row=10, column=0, sticky="ew")
 
         hint_var = tk.StringVar(value="Select any probe to edit, duplicate, or delete.")
         ttk.Label(edit_frame, textvariable=hint_var, style="Hint.TLabel", justify="left").grid(
-            row=10, column=0, sticky="w"
+            row=11, column=0, sticky="w"
         )
 
         button_frame = ttk.Frame(edit_frame, style="CardInner.TFrame")
-        button_frame.grid(row=11, column=0, sticky="ew", pady=(6, 0))
+        button_frame.grid(row=12, column=0, sticky="ew", pady=(6, 0))
         for i in range(5):
             button_frame.columnconfigure(i, weight=1)
 
@@ -615,10 +640,11 @@ def main():
                 impedance_var.set("")
             else:
                 impedance_var.set(f"{selected.impedance_ohms:g}")
-            if selected.volts_to_v_per_m_gain is None:
-                gain_var.set("")
-            else:
-                gain_var.set(f"{selected.volts_to_v_per_m_gain:g}")
+            correction_text.delete("1.0", tk.END)
+            factors = selected.frequency_correction_factors
+            correction_text.insert("1.0", "\n".join(f"{frequency:g}, {factor:g}" for frequency, factor in factors))
+            min_frequency_var.set("" if selected.min_frequency_hz is None else f"{selected.min_frequency_hz:g}")
+            max_frequency_var.set("" if selected.max_frequency_hz is None else f"{selected.max_frequency_hz:g}")
             description_var.set(selected.description or "")
             hint_var.set("Probe selected: save updates, duplicate, or delete.")
 
@@ -640,7 +666,9 @@ def main():
             name_var.set("")
             units_var.set("dBuV")
             impedance_var.set("")
-            gain_var.set("")
+            correction_text.delete("1.0", tk.END)
+            min_frequency_var.set("")
+            max_frequency_var.set("")
             description_var.set("")
             hint_var.set("Create a probe and click Save.")
             name_entry.focus_set()
@@ -669,10 +697,11 @@ def main():
                 impedance_var.set("")
             else:
                 impedance_var.set(f"{source.impedance_ohms:g}")
-            if source.volts_to_v_per_m_gain is None:
-                gain_var.set("")
-            else:
-                gain_var.set(f"{source.volts_to_v_per_m_gain:g}")
+            correction_text.delete("1.0", tk.END)
+            factors = source.frequency_correction_factors
+            correction_text.insert("1.0", "\n".join(f"{frequency:g}, {factor:g}" for frequency, factor in factors))
+            min_frequency_var.set("" if source.min_frequency_hz is None else f"{source.min_frequency_hz:g}")
+            max_frequency_var.set("" if source.max_frequency_hz is None else f"{source.max_frequency_hz:g}")
             description_var.set(source.description or "")
             hint_var.set("Review fields and click Save to create duplicated probe.")
             name_entry.focus_set()
@@ -690,21 +719,35 @@ def main():
                 except ValueError:
                     messagebox.showerror("Invalid Impedance", "Impedance must be numeric.", parent=dialog)
                     return
-            gain_text = gain_var.get().strip()
-            if gain_text == "":
-                gain = None
-            else:
+            factors = []
+            for line_number, line in enumerate(correction_text.get("1.0", tk.END).splitlines(), start=1):
+                line = line.strip()
+                if not line:
+                    continue
                 try:
-                    gain = float(gain_text)
+                    frequency, factor = (float(value.strip()) for value in line.replace(";", ",").split(","))
                 except ValueError:
-                    messagebox.showerror("Invalid Gain", "E-field gain must be numeric.", parent=dialog)
+                    messagebox.showerror(
+                        "Invalid Correction Factor",
+                        f"Line {line_number} must be: frequency in Hz, correction in dB.",
+                        parent=dialog,
+                    )
                     return
+                factors.append((frequency, factor))
+            try:
+                min_frequency = None if not min_frequency_var.get().strip() else float(min_frequency_var.get())
+                max_frequency = None if not max_frequency_var.get().strip() else float(max_frequency_var.get())
+            except ValueError:
+                messagebox.showerror("Invalid Frequency Range", "Minimum and maximum frequencies must be numeric.", parent=dialog)
+                return
             try:
                 probe_registry.upsert_probe(
                     name=name,
                     measured_units=units,
                     impedance_ohms=impedance,
-                    volts_to_v_per_m_gain=gain,
+                    frequency_correction_factors=factors,
+                    min_frequency_hz=min_frequency,
+                    max_frequency_hz=max_frequency,
                     description=description_var.get().strip(),
                 )
             except ValueError as e:
@@ -1264,7 +1307,9 @@ def main():
             "probe_name": probe.name,
             "probe_units": probe.measured_units,
             "probe_impedance_ohms": probe.impedance_ohms,
-            "probe_v_per_m_gain": probe.volts_to_v_per_m_gain,
+            "probe_frequency_correction_factors": [list(point) for point in probe.frequency_correction_factors],
+            "probe_min_frequency_hz": probe.min_frequency_hz,
+            "probe_max_frequency_hz": probe.max_frequency_hz,
         }
 
     def get_trace_probe(trace):
@@ -1284,7 +1329,11 @@ def main():
             name=trace.get("probe_name", "Imported Probe"),
             measured_units=units,
             impedance_ohms=trace.get("probe_impedance_ohms"),
-            volts_to_v_per_m_gain=trace.get("probe_v_per_m_gain"),
+            frequency_correction_factors=tuple(
+                tuple(point) for point in trace.get("probe_frequency_correction_factors", [])
+            ),
+            min_frequency_hz=trace.get("probe_min_frequency_hz"),
+            max_frequency_hz=trace.get("probe_max_frequency_hz"),
             description="",
         )
 
@@ -1365,14 +1414,13 @@ def main():
         for idx, trace in enumerate(traces):
             trace_color = trace.get("color", trace_palette[idx % len(trace_palette)])
             trace_windowed = trace["windowed"]
-            if plot_units != SCOPE_BASE_UNITS:
-                try:
-                    trace_probe = get_trace_probe(trace)
-                    trace_windowed = convert_trace_db(
-                        trace_windowed, SCOPE_BASE_UNITS, plot_units, trace_probe
-                    )
-                except ValueError:
-                    trace_windowed = trace["windowed"]
+            try:
+                trace_probe = get_trace_probe(trace)
+                trace_windowed = convert_trace_db(
+                    trace_windowed, SCOPE_BASE_UNITS, plot_units, trace_probe, trace["freqs"]
+                )
+            except ValueError:
+                trace_windowed = trace["windowed"]
             ax.semilogx(
                 trace["freqs"],
                 trace_windowed,
@@ -1526,9 +1574,9 @@ def main():
                         f"Probe '{selected_probe.name}' active ({selected_probe.impedance_ohms:g} ohm): "
                         f"plotting in {selected_curve.units}."
                     )
-                elif selected_curve.units == "V/m" and selected_probe.volts_to_v_per_m_gain is not None:
+                elif selected_curve.units == "dBuV/m" and selected_probe.frequency_correction_factors:
                     status_var.set(
-                        f"Probe '{selected_probe.name}' active ({selected_probe.volts_to_v_per_m_gain:g} V/m per V): "
+                        f"Probe '{selected_probe.name}' active with calibrated antenna factors: "
                         f"plotting in {selected_curve.units}."
                     )
                 else:
@@ -1654,6 +1702,18 @@ def main():
                 sample_rate_captured,
                 window_name=kernel_window,
             )
+
+        valid_frequency = np.array(
+            [selected_probe.supports_frequency(frequency) for frequency in freqs_captured], dtype=bool
+        )
+        if not np.any(valid_frequency):
+            raise ValueError(
+                f"Probe '{selected_probe.name}' supports no frequencies in this capture "
+                f"({selected_probe.min_frequency_hz or 0:g}–{selected_probe.max_frequency_hz or float('inf'):g} Hz)."
+            )
+        freqs_captured = freqs_captured[valid_frequency]
+        spectrum_original_captured = spectrum_original_captured[valid_frequency]
+        spectrum_windowed_captured = spectrum_windowed_captured[valid_frequency]
 
         return {
             "label": trace_label,
@@ -1944,13 +2004,35 @@ def main():
         nonlocal captured_volts
         nonlocal sample_rate_captured
 
+        def run_with_timeout(fn, timeout_s, operation_name):
+            result = {"value": None, "error": None}
+
+            def worker():
+                try:
+                    result["value"] = fn()
+                except Exception as e:
+                    result["error"] = e
+
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+            t.join(timeout_s)
+            if t.is_alive():
+                raise TimeoutError(f"{operation_name} timed out after {timeout_s}s")
+            if result["error"] is not None:
+                raise result["error"]
+            return result["value"]
+
         try:
             if scope is None:
                 status_var.set("Connecting to scope...")
                 root.update_idletasks()
-                scope = connect_to_scope()
+                scope = run_with_timeout(connect_to_scope, 12, "scope connect")
 
-            captured_volts, dt = get_scope_data(scope)
+            captured_volts, dt = run_with_timeout(
+                lambda: get_scope_data(scope),
+                15,
+                "scope data capture",
+            )
             sample_rate_captured = 1 / dt
             trace = append_trace_from_capture(selected_curve)
             if selected_curve is None:
@@ -1959,6 +2041,15 @@ def main():
                 status_var.set(
                     f"Added trace '{trace['label']}' ({len(captured_volts)} points, window={trace['window']})."
                 )
+        except TimeoutError as e:
+            # Reset scope handle after timeout so the next attempt reconnects cleanly.
+            if scope is not None:
+                try:
+                    scope.close()
+                except Exception:
+                    pass
+                scope = None
+            status_var.set(f"Scope operation timed out: {e}")
         except Exception as e:
             status_var.set(f"Scope capture failed: {e}")
 

@@ -7,7 +7,10 @@ import pyvisa
 
 
 DEFAULT_RESOURCE = None
-DEFAULT_BACKEND = "@py"
+# On Windows, use the installed system VISA implementation by default.  USBTMC
+# devices commonly use the vendor IVI driver there; pyvisa-py requires a
+# separate libusb backend and otherwise lists no USB instruments.
+DEFAULT_BACKEND = None if os.name == "nt" else "@py"
 DEFAULT_BACKEND_ENV = "EMICART_VISA_BACKEND"
 DEFAULT_OPEN_TIMEOUT_MS = 3000
 DEFAULT_IO_TIMEOUT_MS = 5000

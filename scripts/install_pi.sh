@@ -17,6 +17,7 @@ if command -v apt >/dev/null 2>&1; then
     python3-venv \
     python3-pip \
     python3-tk \
+    libusb-1.0-0 \
     libopenblas0 \
     libatlas3-base \
     libatlas-base-dev \
