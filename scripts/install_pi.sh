@@ -8,6 +8,54 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+USBTMC_RULE_PATH="/etc/udev/rules.d/99-usbtmc.rules"
+USBTMC_RULE='SUBSYSTEM=="usb", ATTRS{idVendor}=="0699", MODE="0666", GROUP="plugdev", RUN+="/bin/sh -c '\''echo %k > /sys/bus/usb/drivers/usbtmc/unbind'\''"'
+
+run_privileged() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+    return
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+    return
+  fi
+
+  echo "ERROR: This step requires elevated privileges and sudo is unavailable."
+  echo "Manual fallback command:"
+  echo "  echo \"$USBTMC_RULE\" | tee $USBTMC_RULE_PATH >/dev/null"
+  return 1
+}
+
+install_usbtmc_rule() {
+  echo "Installing USBTMC udev rule..."
+
+  local existing=""
+  if run_privileged test -f "$USBTMC_RULE_PATH"; then
+    existing="$(run_privileged cat "$USBTMC_RULE_PATH")"
+  fi
+
+  if [ "$existing" != "$USBTMC_RULE" ]; then
+    printf "%s\n" "$USBTMC_RULE" | run_privileged tee "$USBTMC_RULE_PATH" >/dev/null
+    echo "Installed udev rule at $USBTMC_RULE_PATH"
+  else
+    echo "Udev rule already up to date at $USBTMC_RULE_PATH"
+  fi
+
+  run_privileged udevadm control --reload-rules
+  run_privileged udevadm trigger
+  echo "Reloaded udev rules and triggered devices."
+
+  if command -v modprobe >/dev/null 2>&1 && lsmod | awk '{print $1}' | grep -qx usbtmc; then
+    run_privileged modprobe -r usbtmc
+    run_privileged modprobe usbtmc
+    echo "Reloaded usbtmc kernel module."
+  fi
+}
+
+install_usbtmc_rule
+
 if command -v apt >/dev/null 2>&1; then
   sudo apt update
   sudo apt install -y \
