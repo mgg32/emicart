@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install EmiCart on Raspberry Pi (Debian/Raspberry Pi OS).
+# Install EmiCart on Raspberry Pi (Debian/Raspberry Pi OS/Ubuntu).
 # Usage:
 #   ./scripts/install_pi.sh
 
@@ -85,26 +85,42 @@ source .venv/bin/activate
 
 python -m pip install --upgrade pip
 
-# Prefer Raspberry Pi wheels when available.
-PIWHEELS_URL="https://www.piwheels.org/simple"
-
-# Install Pillow first (binary wheel only) since matplotlib depends on it.
-# Try a few versions that are commonly available on Bullseye-era Pi builds.
-PILLOW_OK=0
-for PILLOW_VER in 10.4.0 10.3.0 10.2.0 9.5.0; do
-  if python -m pip install --only-binary=:all: --extra-index-url "$PIWHEELS_URL" "Pillow==${PILLOW_VER}"; then
-    PILLOW_OK=1
-    break
-  fi
-done
-if [ "$PILLOW_OK" -ne 1 ]; then
-  echo "ERROR: Could not install a binary Pillow wheel from piwheels."
-  echo "Try updating Raspberry Pi OS / Python, or use wheel-bundle deployment."
-  exit 1
+# Detect the OS to handle piwheels compatibility
+OS_ID="unknown"
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  OS_ID=$ID
 fi
 
-# Runtime deps used by the GUI/instrument path.
-python -m pip install --prefer-binary --extra-index-url "$PIWHEELS_URL" numpy "matplotlib<3.10" scipy pyvisa pyvisa-py pyusb psutil zeroconf
+if [ "$OS_ID" = "ubuntu" ]; then
+  echo "Ubuntu detected. Using standard PyPI for pip packages."
+  
+  # Standard PyPI installation
+  python -m pip install Pillow numpy "matplotlib<3.10" scipy pyvisa pyvisa-py pyusb psutil zeroconf
+else
+  echo "Raspberry Pi OS / Debian detected. Using piwheels."
+  
+  # Prefer Raspberry Pi wheels when available.
+  PIWHEELS_URL="https://www.piwheels.org/simple"
+
+  # Install Pillow first (binary wheel only) since matplotlib depends on it.
+  # Try a few versions that are commonly available on Bullseye-era Pi builds.
+  PILLOW_OK=0
+  for PILLOW_VER in 10.4.0 10.3.0 10.2.0 9.5.0; do
+    if python -m pip install --only-binary=:all: --extra-index-url "$PIWHEELS_URL" "Pillow==${PILLOW_VER}"; then
+      PILLOW_OK=1
+      break
+    fi
+  done
+  if [ "$PILLOW_OK" -ne 1 ]; then
+    echo "ERROR: Could not install a binary Pillow wheel from piwheels."
+    echo "Try updating Raspberry Pi OS / Python, or use wheel-bundle deployment."
+    exit 1
+  fi
+
+  # Runtime deps used by the GUI/instrument path.
+  python -m pip install --prefer-binary --extra-index-url "$PIWHEELS_URL" numpy "matplotlib<3.10" scipy pyvisa pyvisa-py pyusb psutil zeroconf
+fi
 
 # Install project package.
 python -m pip install .
