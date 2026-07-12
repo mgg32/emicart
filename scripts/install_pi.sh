@@ -57,7 +57,8 @@ install_usbtmc_rule() {
 install_usbtmc_rule
 
 if command -v apt >/dev/null 2>&1; then
-  sudo apt update
+  # Use '|| true' so the script doesn't abort if apt update throws a minor warning
+  sudo apt update || true
   sudo apt install -y \
     build-essential \
     pkg-config \
@@ -81,15 +82,18 @@ if command -v apt >/dev/null 2>&1; then
 fi
 
 python3 -m venv .venv
+
+# Temporarily disable unbound variable check (-u) as the activate script often fails it
+set +u
 source .venv/bin/activate
+set -u
 
 python -m pip install --upgrade pip
 
-# Detect the OS to handle piwheels compatibility
+# Detect the OS safely without sourcing to prevent unbound variable crashes
 OS_ID="unknown"
 if [ -f /etc/os-release ]; then
-  . /etc/os-release
-  OS_ID=$ID
+  OS_ID=$(awk -F= '/^ID=/{print $2}' /etc/os-release | tr -d '"')
 fi
 
 if [ "$OS_ID" = "ubuntu" ]; then
