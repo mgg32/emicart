@@ -1,5 +1,5 @@
 Param(
-    [string]$PythonExe = "py"
+    [string]$PythonExe = "python"
 )
 
 $ErrorActionPreference = "Stop"
