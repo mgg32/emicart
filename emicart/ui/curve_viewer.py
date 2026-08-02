@@ -9,6 +9,7 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -261,8 +262,14 @@ def main():
     plot_frame.columnconfigure(0, weight=1)
     plot_frame.rowconfigure(0, weight=1)
 
-    fig = plt.figure(figsize=(5, 4), dpi=100, facecolor=colors["card_bg"])
-    plt.subplot(111)
+    # Use matplotlib.figure.Figure() directly rather than pyplot's stateful
+    # plt.figure() -- pyplot registers every figure it creates in its own
+    # global manager (Gcf), which keeps a reference to the Tk canvas/window
+    # alive independent of our own widget tree. That prevents Tk's
+    # mainloop() from ever detecting all windows are gone, so the app hangs
+    # forever after root.destroy() even though the window itself closes.
+    fig = Figure(figsize=(5, 4), dpi=100, facecolor=colors["card_bg"])
+    fig.add_subplot(111)
 
     canvas = FigureCanvasTkAgg(fig, master=plot_frame)
     canvas.draw()
@@ -1313,7 +1320,11 @@ def main():
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
 
-        fig_w = plt.figure(figsize=(8, 4), dpi=100, facecolor=colors["card_bg"])
+        # See the comment near the main plot's Figure() call above -- must
+        # not use pyplot's stateful plt.figure() here either, or this
+        # dialog's figure will also be registered in pyplot's global Gcf
+        # manager and keep the app's mainloop() from ever exiting on close.
+        fig_w = Figure(figsize=(8, 4), dpi=100, facecolor=colors["card_bg"])
         ax_w = fig_w.add_subplot(111)
         ax_w.set_facecolor(colors["plot_bg"])
 
