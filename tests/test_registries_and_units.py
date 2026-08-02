@@ -43,9 +43,71 @@ class RegistryAndUnitsTests(unittest.TestCase):
         )
         self.assertEqual(created.name, "Test Probe")
         self.assertIn("Test Probe", probes.get_probe_names())
+        # Default termination should be the safe high-impedance option.
+        self.assertEqual(created.termination_ohms, probes.DEFAULT_TERMINATION_OHMS)
 
         self.assertTrue(probes.delete_probe("Test Probe"))
         self.assertNotIn("Test Probe", probes.get_probe_names())
+
+    def test_probe_registry_deleted_default_probe_is_not_restored_on_reload(self):
+        # Regression test: deleting a bundled default probe must persist
+        # across restarts, not get silently re-added the next time the
+        # registry is loaded.
+        probes = importlib.import_module("emicart.probes.registry")
+        probes = importlib.reload(probes)
+
+        default_names = probes.get_probe_names()
+        self.assertTrue(default_names)
+        victim = default_names[0]
+
+        self.assertTrue(probes.delete_probe(victim))
+        self.assertNotIn(victim, probes.get_probe_names())
+
+        # Simulate an app restart: reload the module fresh from the store.
+        probes = importlib.reload(probes)
+        self.assertNotIn(victim, probes.get_probe_names())
+
+    def test_probe_registry_deleting_all_probes_stays_empty_on_reload(self):
+        probes = importlib.import_module("emicart.probes.registry")
+        probes = importlib.reload(probes)
+
+        for name in list(probes.get_probe_names()):
+            self.assertTrue(probes.delete_probe(name))
+        self.assertEqual(probes.get_probe_names(), [])
+
+        probes = importlib.reload(probes)
+        self.assertEqual(probes.get_probe_names(), [])
+
+    def test_probe_registry_upsert_accepts_and_persists_termination(self):
+        probes = importlib.import_module("emicart.probes.registry")
+        probes = importlib.reload(probes)
+
+        created = probes.upsert_probe(
+            name="50 Ohm Test Probe",
+            measured_units="dBuV",
+            termination_ohms=50.0,
+        )
+        self.assertEqual(created.termination_ohms, 50.0)
+
+        # Reloading from disk should preserve the termination choice.
+        probes = importlib.reload(probes)
+        reloaded = probes.get_probe_by_name("50 Ohm Test Probe")
+        self.assertIsNotNone(reloaded)
+        self.assertEqual(reloaded.termination_ohms, 50.0)
+
+        self.assertTrue(probes.delete_probe("50 Ohm Test Probe"))
+
+    def test_probe_registry_upsert_rejects_unsupported_termination(self):
+        probes = importlib.import_module("emicart.probes.registry")
+        probes = importlib.reload(probes)
+
+        with self.assertRaises(ValueError):
+            probes.upsert_probe(
+                name="Bad Termination Probe",
+                measured_units="dBuV",
+                termination_ohms=75.0,
+            )
+        self.assertNotIn("Bad Termination Probe", probes.get_probe_names())
 
     def test_limit_registry_seed_upsert_delete(self):
         limits = importlib.import_module("emicart.limits.registry")
@@ -68,6 +130,35 @@ class RegistryAndUnitsTests(unittest.TestCase):
 
         self.assertTrue(limits.delete_curve("TEST-STD", "Curve A"))
         self.assertIsNone(limits.get_curve_by_name("Curve A", standard="TEST-STD"))
+
+    def test_limit_registry_deleted_default_standard_is_not_restored_on_reload(self):
+        # Regression test: deleting a bundled default standard must persist
+        # across restarts, not get silently re-added the next time the
+        # registry is loaded.
+        limits = importlib.import_module("emicart.limits.registry")
+        limits = importlib.reload(limits)
+
+        default_standards = limits.get_standards()
+        self.assertTrue(default_standards)
+        victim = default_standards[0]
+
+        self.assertTrue(limits.delete_standard(victim))
+        self.assertNotIn(victim, limits.get_standards())
+
+        # Simulate an app restart: reload the module fresh from the store.
+        limits = importlib.reload(limits)
+        self.assertNotIn(victim, limits.get_standards())
+
+    def test_limit_registry_deleting_all_standards_stays_empty_on_reload(self):
+        limits = importlib.import_module("emicart.limits.registry")
+        limits = importlib.reload(limits)
+
+        for standard in list(limits.get_standards()):
+            self.assertTrue(limits.delete_standard(standard))
+        self.assertEqual(limits.get_standards(), [])
+
+        limits = importlib.reload(limits)
+        self.assertEqual(limits.get_standards(), [])
 
     def test_legacy_v_per_m_limit_is_migrated_to_dbuv_per_m(self):
         limits = importlib.import_module("emicart.limits.registry")

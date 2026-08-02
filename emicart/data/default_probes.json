@@ -3,6 +3,7 @@
     "name": "Direct Voltage (No Probe)",
     "measured_units": "dBuV",
     "impedance_ohms": null,
+    "termination_ohms": 1000000.0,
     "min_frequency_hz": 9000,
     "max_frequency_hz": 30000000,
     "description": "No conversion. Scope voltage is plotted as dBuV."
@@ -11,6 +12,7 @@
     "name": "50 Ohm LISN / Transimpedance",
     "measured_units": "dBuA",
     "impedance_ohms": 50.0,
+    "termination_ohms": 50.0,
     "min_frequency_hz": 9000,
     "max_frequency_hz": 30000000,
     "description": "Converts scope dBuV to dBuA using 50 ohm transimpedance."
@@ -19,6 +21,7 @@
     "name": "5 Ohm Current Probe",
     "measured_units": "dBuA",
     "impedance_ohms": 5.0,
+    "termination_ohms": 50.0,
     "min_frequency_hz": 9000,
     "max_frequency_hz": 30000000,
     "description": "Converts scope dBuV to dBuA using 5 ohm transimpedance."
@@ -27,6 +30,7 @@
     "name": "E-Field Probe (26 dB/m)",
     "measured_units": "dBuV/m",
     "impedance_ohms": null,
+    "termination_ohms": 50.0,
     "frequency_correction_factors": [[1000000, 26.0206]],
     "min_frequency_hz": 9000,
     "max_frequency_hz": 30000000,
@@ -36,6 +40,7 @@
     "name": "E-Field Probe (40 dB/m)",
     "measured_units": "dBuV/m",
     "impedance_ohms": null,
+    "termination_ohms": 50.0,
     "frequency_correction_factors": [[1000000, 40.0]],
     "min_frequency_hz": 9000,
     "max_frequency_hz": 30000000,
@@ -45,6 +50,7 @@
     "name": "E-Field Probe (Placeholder)",
     "measured_units": "dBuV/m",
     "impedance_ohms": null,
+    "termination_ohms": 50.0,
     "frequency_correction_factors": [[1000000, 0.0]],
     "min_frequency_hz": 9000,
     "max_frequency_hz": 30000000,

@@ -230,6 +230,12 @@ def _save_standard_registry(registry: Dict[str, List[Curve]]) -> None:
 
 
 def _load_standard_registry() -> Dict[str, List[Curve]]:
+    """Load the user's standards store, seeding it with the bundled defaults
+    only on first run (i.e. the store file does not exist yet). After that,
+    the store is the sole source of truth: the user is free to edit or
+    delete any standard/curve -- including the defaults -- and those
+    changes/deletions must persist across restarts rather than being
+    silently re-added."""
     path = _get_limit_store_path()
     if not path.exists():
         seeded = _build_default_standard_registry()
@@ -267,26 +273,6 @@ def _load_standard_registry() -> Dict[str, List[Curve]]:
         if curves_for_std:
             registry[std] = curves_for_std
 
-    if not registry:
-        registry = _build_default_standard_registry()
-        _save_standard_registry(registry)
-        return registry
-
-    # Add newly introduced default standards/curves without overwriting user edits.
-    defaults = _build_default_standard_registry()
-    added = False
-    for std, default_curves in defaults.items():
-        if std not in registry:
-            registry[std] = list(default_curves)
-            added = True
-            continue
-        existing_names = {c.name for c in registry[std]}
-        for c in default_curves:
-            if c.name not in existing_names:
-                registry[std].append(c)
-                added = True
-    if added:
-        _save_standard_registry(registry)
     return registry
 
 

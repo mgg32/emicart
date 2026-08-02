@@ -1,7 +1,9 @@
 import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
+import queue
 import threading
+import time
 import warnings
 from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import List, Optional, Tuple
@@ -16,7 +18,12 @@ from emicart.analysis.fft import (
     get_window_array,
 )
 from emicart.analysis.units import SCOPE_BASE_UNITS, convert_trace_db
-from emicart.instruments.tektronix import connect_to_scope, get_scope_data
+from emicart.instruments.tektronix import (
+    DEFAULT_MAX_POINTS,
+    apply_autoscale,
+    connect_to_scope,
+    get_scope_data,
+)
 from emicart.limits import registry as curve
 from emicart.probes import registry as probe_registry
 from emicart.ui.files import (
@@ -32,6 +39,55 @@ from emicart.ui.import_export import (
     read_npz_import,
     write_csv_export,
 )
+
+
+def _format_termination_ohms(value: float) -> str:
+    """Format a termination value for the probe dialog's radio buttons.
+
+    Termination is always a whole number of ohms (50 or 1,000,000), so plain
+    integer formatting is used here rather than Python's general ("g") float
+    format -- ":g" renders 1,000,000.0 as "1e+06", which does not match
+    either Radiobutton's literal `value=` string, leaving neither button
+    selected when a probe with 1 Mohm termination is loaded.
+    """
+    return str(int(round(value)))
+
+
+def _format_autoscale_step(event: str, info: dict) -> str:
+    """Turn one apply_autoscale() on_step event into a human-readable status
+    bar message describing what is being sent to/read from the scope."""
+    if event == "command_sent":
+        return f"Autoscaling: sent '{info['command']}'"
+    if event == "post_autoset":
+        return (
+            f"Autoscaling: AutoSet complete (time/div={info['time_per_div']:g} s, "
+            f"{info['record_length']} pts) -- computing horizontal scale..."
+        )
+    if event == "post_autoset_query_failed":
+        return f"Autoscaling: AutoSet complete (could not read back state: {info['error']})"
+    if event == "safe_timebase_set":
+        return (
+            f"Autoscaling: forced {info['safe_time_per_div']:g} s/div to measure the "
+            f"true record-length ceiling ({info['readback']} pts)"
+        )
+    if event == "record_length_ceiling_resolved":
+        return (
+            f"Autoscaling: record-length ceiling = {info['achievable_record_length']} pts "
+            f"(requested {info['desired_record_length']})"
+        )
+    if event == "record_length_ceiling_query_failed":
+        return f"Autoscaling: could not resolve the record-length ceiling ({info['error']})"
+    if event == "candidate_tested":
+        outcome = "ok" if info["success"] else "too few points"
+        return (
+            f"Autoscaling: tried {info['candidate']:g} s/div -> "
+            f"{info['achieved_record_length']}/{info['target_record_length']} pts ({outcome})"
+        )
+    if event == "candidate_query_failed":
+        return f"Autoscaling: readback failed for {info['candidate']:g} s/div ({info['error']})"
+    if event == "best_reapplied":
+        return f"Autoscaling: locked in {info['time_per_div']:g} s/div ({info['record_length']} pts)"
+    return f"Autoscaling: {event}"
 
 
 def main():
@@ -508,7 +564,7 @@ def main():
 
         edit_frame = ttk.Frame(panes, style="CardInner.TFrame")
         edit_frame.columnconfigure(0, weight=1)
-        for i in range(12):
+        for i in range(14):
             edit_frame.rowconfigure(i, pad=4)
         panes.add(list_frame, weight=2)
         panes.add(edit_frame, weight=3)
@@ -554,9 +610,20 @@ def main():
         )
         impedance_entry.grid(row=5, column=0, sticky="ew")
 
+        ttk.Label(edit_frame, text="Scope Input Termination", style="Ui.TLabel").grid(row=6, column=0, sticky="w")
+        termination_var = tk.StringVar(value="1000000")
+        termination_frame = ttk.Frame(edit_frame, style="CardInner.TFrame")
+        termination_frame.grid(row=7, column=0, sticky="ew")
+        ttk.Radiobutton(
+            termination_frame, text="50 \u03a9", variable=termination_var, value="50", style="Ui.TRadiobutton"
+        ).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Radiobutton(
+            termination_frame, text="1 M\u03a9", variable=termination_var, value="1000000", style="Ui.TRadiobutton"
+        ).grid(row=0, column=1, sticky="w")
+
         correction_label_var = tk.StringVar(value="Frequency Corrections (Hz, dB)")
         ttk.Label(edit_frame, textvariable=correction_label_var, style="Ui.TLabel").grid(
-            row=6, column=0, sticky="w"
+            row=8, column=0, sticky="w"
         )
         correction_text = tk.Text(
             edit_frame,
@@ -571,7 +638,7 @@ def main():
             bd=0,
             height=5,
         )
-        correction_text.grid(row=7, column=0, sticky="ew")
+        correction_text.grid(row=9, column=0, sticky="ew")
 
         def refresh_correction_hint(*_):
             if units_var.get() == "dBuV/m":
@@ -582,7 +649,7 @@ def main():
         units_var.trace_add("write", refresh_correction_hint)
 
         range_frame = ttk.Frame(edit_frame, style="CardInner.TFrame")
-        range_frame.grid(row=8, column=0, sticky="ew")
+        range_frame.grid(row=10, column=0, sticky="ew")
         range_frame.columnconfigure(0, weight=1)
         range_frame.columnconfigure(1, weight=1)
         min_frequency_var = tk.StringVar()
@@ -597,7 +664,7 @@ def main():
                 highlightcolor=colors["accent"], bd=0,
             ).grid(row=1, column=column, sticky="ew", padx=(0, 4) if column == 0 else (4, 0))
 
-        ttk.Label(edit_frame, text="Description", style="Ui.TLabel").grid(row=9, column=0, sticky="w")
+        ttk.Label(edit_frame, text="Description", style="Ui.TLabel").grid(row=11, column=0, sticky="w")
         description_var = tk.StringVar()
         description_entry = tk.Entry(
             edit_frame,
@@ -612,15 +679,15 @@ def main():
             highlightcolor=colors["accent"],
             bd=0,
         )
-        description_entry.grid(row=10, column=0, sticky="ew")
+        description_entry.grid(row=12, column=0, sticky="ew")
 
         hint_var = tk.StringVar(value="Select any probe to edit, duplicate, or delete.")
         ttk.Label(edit_frame, textvariable=hint_var, style="Hint.TLabel", justify="left").grid(
-            row=11, column=0, sticky="w"
+            row=13, column=0, sticky="w"
         )
 
         button_frame = ttk.Frame(edit_frame, style="CardInner.TFrame")
-        button_frame.grid(row=12, column=0, sticky="ew", pady=(6, 0))
+        button_frame.grid(row=14, column=0, sticky="ew", pady=(6, 0))
         for i in range(5):
             button_frame.columnconfigure(i, weight=1)
 
@@ -640,6 +707,7 @@ def main():
                 impedance_var.set("")
             else:
                 impedance_var.set(f"{selected.impedance_ohms:g}")
+            termination_var.set(_format_termination_ohms(selected.termination_ohms))
             correction_text.delete("1.0", tk.END)
             factors = selected.frequency_correction_factors
             correction_text.insert("1.0", "\n".join(f"{frequency:g}, {factor:g}" for frequency, factor in factors))
@@ -666,6 +734,7 @@ def main():
             name_var.set("")
             units_var.set("dBuV")
             impedance_var.set("")
+            termination_var.set("1000000")
             correction_text.delete("1.0", tk.END)
             min_frequency_var.set("")
             max_frequency_var.set("")
@@ -697,6 +766,7 @@ def main():
                 impedance_var.set("")
             else:
                 impedance_var.set(f"{source.impedance_ohms:g}")
+            termination_var.set(_format_termination_ohms(source.termination_ohms))
             correction_text.delete("1.0", tk.END)
             factors = source.frequency_correction_factors
             correction_text.insert("1.0", "\n".join(f"{frequency:g}, {factor:g}" for frequency, factor in factors))
@@ -741,6 +811,11 @@ def main():
                 messagebox.showerror("Invalid Frequency Range", "Minimum and maximum frequencies must be numeric.", parent=dialog)
                 return
             try:
+                termination = float(termination_var.get())
+            except ValueError:
+                messagebox.showerror("Invalid Termination", "Termination must be numeric.", parent=dialog)
+                return
+            try:
                 probe_registry.upsert_probe(
                     name=name,
                     measured_units=units,
@@ -748,6 +823,7 @@ def main():
                     frequency_correction_factors=factors,
                     min_frequency_hz=min_frequency,
                     max_frequency_hz=max_frequency,
+                    termination_ohms=termination,
                     description=description_var.get().strip(),
                 )
             except ValueError as e:
@@ -1643,11 +1719,20 @@ def main():
                     # Without a selected curve there is no RBW profile. Fall back to
                     # legacy whole-record time-domain windowing behavior.
                     kernel_window = "rectangular" if selected_window == "none" else selected_window
-                    _, windowed_base = compute_single_sided_fft_db(
+                    fresh_freqs, fresh_windowed = compute_single_sided_fft_db(
                         trace["volts"],
                         trace["sample_rate"],
                         window_name=kernel_window,
                     )
+                    # trace["freqs"]/["original"] were trimmed at capture time to
+                    # the probe's supported frequency range, but trace["volts"]
+                    # keeps the full record -- re-apply the same trim here so the
+                    # recomputed spectrum's length matches trace["freqs"] again.
+                    trace_probe = get_trace_probe(trace)
+                    valid_frequency = np.array(
+                        [trace_probe.supports_frequency(f) for f in fresh_freqs], dtype=bool
+                    )
+                    windowed_base = fresh_windowed[valid_frequency]
                     trace["effective_rbw_hz"] = None
                 trace["windowed"] = windowed_base
                 reapplied += 1
@@ -1706,11 +1791,8 @@ def main():
         valid_frequency = np.array(
             [selected_probe.supports_frequency(frequency) for frequency in freqs_captured], dtype=bool
         )
-        if not np.any(valid_frequency):
-            raise ValueError(
-                f"Probe '{selected_probe.name}' supports no frequencies in this capture "
-                f"({selected_probe.min_frequency_hz or 0:g}–{selected_probe.max_frequency_hz or float('inf'):g} Hz)."
-            )
+        # Silently drop frequencies outside the probe's supported range; do not
+        # block the capture even if the probe supports none of them.
         freqs_captured = freqs_captured[valid_frequency]
         spectrum_original_captured = spectrum_original_captured[valid_frequency]
         spectrum_windowed_captured = spectrum_windowed_captured[valid_frequency]
@@ -2004,7 +2086,16 @@ def main():
         nonlocal captured_volts
         nonlocal sample_rate_captured
 
-        def run_with_timeout(fn, timeout_s, operation_name):
+        def run_with_timeout(fn, timeout_s, operation_name, on_poll=None):
+            # IMPORTANT: fn() runs on a background thread while this function
+            # blocks the main/UI thread. Tkinter/Tcl is not thread-safe, so
+            # fn() (and anything it calls, e.g. on_step callbacks) must NEVER
+            # touch Tk widgets directly -- doing so from a non-main thread
+            # while the main thread is blocked here can corrupt Tcl's
+            # internal state and hang the whole app. Instead, fn() may only
+            # push plain data into a thread-safe queue.Queue; on_poll (called
+            # here, on the main thread, between short joins) is the only
+            # place that may safely touch Tk widgets to drain that queue.
             result = {"value": None, "error": None}
 
             def worker():
@@ -2015,7 +2106,14 @@ def main():
 
             t = threading.Thread(target=worker, daemon=True)
             t.start()
-            t.join(timeout_s)
+            deadline = time.monotonic() + timeout_s
+            poll_interval = 0.1
+            while t.is_alive() and time.monotonic() < deadline:
+                t.join(poll_interval)
+                if on_poll:
+                    on_poll()
+            if on_poll:
+                on_poll()
             if t.is_alive():
                 raise TimeoutError(f"{operation_name} timed out after {timeout_s}s")
             if result["error"] is not None:
@@ -2028,6 +2126,53 @@ def main():
                 root.update_idletasks()
                 scope = run_with_timeout(connect_to_scope, 12, "scope connect")
 
+            # A limit curve requires the capture to resolve up to its highest
+            # breakpoint frequency; otherwise maximize the sample rate instead.
+            required_max_frequency_hz = None
+            if selected_curve is not None and selected_curve.breakpoints:
+                top_freq = selected_curve.breakpoints[-1][0]
+                if top_freq and top_freq > 0:
+                    required_max_frequency_hz = float(top_freq)
+
+            status_var.set("Autoscaling scope...")
+            root.update_idletasks()
+            active_probe = get_selected_probe()
+
+            autoscale_status_queue = queue.Queue()
+
+            def on_autoscale_step(event, info):
+                # Called on the background worker thread inside
+                # run_with_timeout -- must not touch any Tk widget. Only
+                # push a plain string; the main thread drains this queue via
+                # drain_autoscale_status() below.
+                autoscale_status_queue.put(_format_autoscale_step(event, info))
+
+            def drain_autoscale_status():
+                # Runs on the main thread (passed as on_poll to
+                # run_with_timeout), so it is safe to update status_var here.
+                latest = None
+                while True:
+                    try:
+                        latest = autoscale_status_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                if latest is not None:
+                    status_var.set(latest)
+                    root.update_idletasks()
+
+            autoscale_info = run_with_timeout(
+                lambda: apply_autoscale(
+                    scope,
+                    record_length=DEFAULT_MAX_POINTS,
+                    required_max_frequency_hz=required_max_frequency_hz,
+                    termination_ohms=active_probe.termination_ohms,
+                    on_step=on_autoscale_step,
+                ),
+                30,
+                "scope autoscale",
+                on_poll=drain_autoscale_status,
+            )
+
             captured_volts, dt = run_with_timeout(
                 lambda: get_scope_data(scope),
                 15,
@@ -2035,11 +2180,20 @@ def main():
             )
             sample_rate_captured = 1 / dt
             trace = append_trace_from_capture(selected_curve)
+            time_per_div = autoscale_info["time_per_div"]
+            termination_ohms = autoscale_info.get("termination_ohms")
+            termination_label = (
+                "" if termination_ohms is None else f", {termination_ohms:g} ohm termination"
+            )
             if selected_curve is None:
-                status_var.set(f"Added trace '{trace['label']}' ({len(captured_volts)} points, no limit curve).")
+                status_var.set(
+                    f"Added trace '{trace['label']}' ({len(captured_volts)} points, no limit curve, "
+                    f"{time_per_div:g} s/div for max sample rate{termination_label})."
+                )
             else:
                 status_var.set(
-                    f"Added trace '{trace['label']}' ({len(captured_volts)} points, window={trace['window']})."
+                    f"Added trace '{trace['label']}' ({len(captured_volts)} points, window={trace['window']}, "
+                    f"{time_per_div:g} s/div for {required_max_frequency_hz:g} Hz max{termination_label})."
                 )
         except TimeoutError as e:
             # Reset scope handle after timeout so the next attempt reconnects cleanly.

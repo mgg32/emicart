@@ -9,6 +9,13 @@ from typing import Dict, List, Optional, Sequence, Tuple
 logger = logging.getLogger(__name__)
 SUPPORTED_PROBE_UNITS = {"dBuV", "dBuA", "dBuV/m", "V/m"}  # V/m is accepted only for legacy migration.
 
+# Scope input termination options a probe can be associated with. 50 ohm
+# matches devices with a 50 ohm coax output (LISNs, current probes); 1 Mohm
+# is the high-impedance option most passive/active voltage probes and
+# antennas expect. This is commanded to the scope at capture time.
+TERMINATION_OPTIONS_OHMS = (50.0, 1_000_000.0)
+DEFAULT_TERMINATION_OHMS = 1_000_000.0
+
 @dataclass(frozen=True)
 class Probe:
     name: str
@@ -19,6 +26,9 @@ class Probe:
     frequency_correction_factors: Tuple[Tuple[float, float], ...] = ()
     min_frequency_hz: Optional[float] = None
     max_frequency_hz: Optional[float] = None
+    # Scope input termination (ohms) to command before a capture with this
+    # probe. Must be one of TERMINATION_OPTIONS_OHMS.
+    termination_ohms: float = DEFAULT_TERMINATION_OHMS
 
     def supports_frequency(self, frequency_hz: float) -> bool:
         return (
@@ -111,6 +121,7 @@ def _probe_to_dict(probe: Probe) -> dict:
         "frequency_correction_factors": [list(point) for point in probe.frequency_correction_factors],
         "min_frequency_hz": probe.min_frequency_hz,
         "max_frequency_hz": probe.max_frequency_hz,
+        "termination_ohms": probe.termination_ohms,
         "description": probe.description,
     }
 
@@ -166,6 +177,13 @@ def _dict_to_probe(raw: dict) -> Optional[Probe]:
         return None
     if measured_units == "dBuA" and (impedance_ohms is None or impedance_ohms <= 0):
         return None
+    termination_raw = raw.get("termination_ohms", DEFAULT_TERMINATION_OHMS)
+    try:
+        termination_ohms = float(termination_raw)
+    except (TypeError, ValueError):
+        return None
+    if not any(math.isclose(termination_ohms, option) for option in TERMINATION_OPTIONS_OHMS):
+        return None
     # Upgrade the first implementation's linear V/m-per-V field to an
     # equivalent one-point antenna factor in dBµV/m.
     if measured_units == "V/m":
@@ -186,6 +204,7 @@ def _dict_to_probe(raw: dict) -> Optional[Probe]:
         frequency_correction_factors=tuple(factors),
         min_frequency_hz=min_frequency_hz,
         max_frequency_hz=max_frequency_hz,
+        termination_ohms=termination_ohms,
         description=description,
     )
 
@@ -197,6 +216,11 @@ def _save_probe_registry(registry: Dict[str, Probe]) -> None:
 
 
 def _load_probe_registry() -> Dict[str, Probe]:
+    """Load the user's probe store, seeding it with the bundled defaults only
+    on first run (i.e. the store file does not exist yet). After that, the
+    store is the sole source of truth: the user is free to edit or delete
+    any probe -- including the defaults -- and those changes/deletions must
+    persist across restarts rather than being silently re-added."""
     path = _get_probe_store_path()
     if not path.exists():
         seeded = _build_default_probe_registry()
@@ -221,20 +245,6 @@ def _load_probe_registry() -> Dict[str, Probe]:
     if invalid_count:
         logger.warning("Dropped %d invalid probe entries from %s.", invalid_count, path)
 
-    if not registry:
-        registry = _build_default_probe_registry()
-        _save_probe_registry(registry)
-        return registry
-
-    # Add newly introduced default probes without overwriting user-edited entries.
-    defaults = _build_default_probe_registry()
-    added = False
-    for name, probe in defaults.items():
-        if name not in registry:
-            registry[name] = probe
-            added = True
-    if added:
-        _save_probe_registry(registry)
     return registry
 
 
@@ -255,16 +265,17 @@ def get_probe_by_name(name: str) -> Optional[Probe]:
 
 
 def get_default_probe() -> Probe:
+    """Return a reasonable probe to select by default. Falls back to an
+    in-memory-only placeholder if the user has deleted every probe -- this
+    placeholder is NOT written back to the store, so an intentionally empty
+    registry stays empty across restarts."""
     direct = _probe_registry.get("Direct Voltage (No Probe)")
     if direct is not None:
         return direct
     first = next(iter(_probe_registry.values()), None)
     if first is not None:
         return first
-    fallback = Probe(name="Direct Voltage (No Probe)", measured_units="dBuV")
-    _probe_registry[fallback.name] = fallback
-    _save_probe_registry(_probe_registry)
-    return fallback
+    return Probe(name="Direct Voltage (No Probe)", measured_units="dBuV")
 
 
 def upsert_probe(
@@ -274,6 +285,7 @@ def upsert_probe(
     frequency_correction_factors: Sequence[Tuple[float, float]] = (),
     min_frequency_hz: Optional[float] = None,
     max_frequency_hz: Optional[float] = None,
+    termination_ohms: float = DEFAULT_TERMINATION_OHMS,
     description: str = "",
 ) -> Probe:
     probe_name = (name or "").strip()
@@ -304,6 +316,14 @@ def upsert_probe(
         raise ValueError("Probe impedance must be > 0 ohms.")
     if impedance_ohms is not None and impedance_ohms <= 0:
         raise ValueError("Probe impedance must be > 0 ohms.")
+    try:
+        termination_ohms = float(termination_ohms)
+    except (TypeError, ValueError):
+        raise ValueError("Termination must be numeric.")
+    if not any(math.isclose(termination_ohms, option) for option in TERMINATION_OPTIONS_OHMS):
+        raise ValueError(
+            "Termination must be one of: " + ", ".join(f"{option:g}" for option in TERMINATION_OPTIONS_OHMS) + " ohms."
+        )
 
     probe = Probe(
         name=probe_name,
@@ -312,6 +332,7 @@ def upsert_probe(
         frequency_correction_factors=factors,
         min_frequency_hz=min_frequency_hz,
         max_frequency_hz=max_frequency_hz,
+        termination_ohms=termination_ohms,
         description=(description or "").strip(),
     )
     _probe_registry[probe_name] = probe
