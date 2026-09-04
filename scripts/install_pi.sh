@@ -127,7 +127,7 @@ else
 fi
 
 # Install project package.
-python -m pip install .
+python -m pip install -e .
 
 # Create desktop launcher(s).
 echo "Creating desktop launcher..."
