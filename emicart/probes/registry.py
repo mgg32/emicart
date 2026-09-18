@@ -29,17 +29,17 @@ class Probe:
     # Scope input termination (ohms) to command before a capture with this
     # probe. Must be one of TERMINATION_OPTIONS_OHMS.
     termination_ohms: float = DEFAULT_TERMINATION_OHMS
+    description: str = ""
 
     def supports_frequency(self, frequency_hz: float) -> bool:
         return (
             (self.min_frequency_hz is None or frequency_hz >= self.min_frequency_hz)
             and (self.max_frequency_hz is None or frequency_hz <= self.max_frequency_hz)
         )
-    description: str = ""
 
     def can_convert(self, from_units: str, to_units: str) -> bool:
         if from_units == to_units:
-            return True
+    return True
         pair = {from_units, to_units}
         if pair == {"dBuV", "dBuA"}:
             return self.impedance_ohms is not None and self.impedance_ohms > 0
@@ -349,3 +349,4 @@ def delete_probe(name: str) -> bool:
     del _probe_registry[probe_name]
     _save_probe_registry(_probe_registry)
     return True
+
