@@ -38,14 +38,14 @@ class Probe:
         )
 
     def can_convert(self, from_units: str, to_units: str) -> bool:
-        if from_units == to_units:
-    return True
-        pair = {from_units, to_units}
-        if pair == {"dBuV", "dBuA"}:
-            return self.impedance_ohms is not None and self.impedance_ohms > 0
-        if from_units == "dBuV" and to_units == "dBuV/m":
-            return bool(self.frequency_correction_factors)
-        return False
+            if from_units == to_units:
+                return True
+            pair = {from_units, to_units}
+            if pair == {"dBuV", "dBuA"}:
+                return self.impedance_ohms is not None and self.impedance_ohms > 0
+            if from_units == "dBuV" and to_units == "dBuV/m":
+                return bool(self.frequency_correction_factors)
+            return False
 
     def convert_db_level(self, value_db: float, from_units: str, to_units: str) -> float:
         if from_units == to_units:
